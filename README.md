@@ -7,7 +7,11 @@
 目标不是把数据抓下来，而是先证明「这套方案在真实接口上成立到什么程度」，
 再把可用的部分工程化。
 
-工作区：`D:\MovieData`
+## 下载
+
+- 最新版：[Releases · latest](https://github.com/jym080621-dot/MovieData/releases/latest)
+- 历史版本：`v1.0.0` → `v1.3.3`，每个版本都附源码包；`v1.0.0` 另附 Windows 免安装包（`MovieData_v1.0.0_win64.zip`）
+- 源码运行：解压后 `python gui.py`（Python 3.10+，纯标准库，无需 `pip install`）
 
 ---
 
@@ -164,7 +168,7 @@ python pipeline.py box --cinema "上海影城,33019193" --start 2026-04-01 --end
 ## 四、快速开始（命令行）
 
 ```bash
-# 0. 环境：Python 3.7+，纯标准库，无需 pip install
+# 0. 环境：Python 3.10+，纯标准库，无需 pip install
 python contract_test.py                 # 先验契约，32 条断言
 
 # 1. 探测某段日期的影院维度可用性

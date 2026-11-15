@@ -38,7 +38,7 @@ SRC_FILES = [
     "启动采集器.bat", "启动单片全国历史.bat", "launch_source.bat", "启动说明.txt",
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
     "tests/test_movie_history.py",
-    "sample.csv",
+    "sample.csv", "LICENSE",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png"]
 PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png"]

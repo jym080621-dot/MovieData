@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 运行产物（体积大、可重建，不要提交）
+boxoffice.db
+boxoffice.db-journal
+boxoffice.db-shm
+boxoffice.db-wal
+raw/
+output/
+dist/
+build/
+*.spec
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
