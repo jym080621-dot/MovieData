@@ -177,7 +177,10 @@ class QuickHistoryDialog(tk.Toplevel):
         self.choices.configure(state="readonly")
         self.stop.configure(state="disabled")
         if error:
-            self.status.set(f"本次处理停止 · {error}")
+            stage = {"search": "查找本地影片", "remote_search": "联网查找影片",
+                     "preview": "读取当前覆盖", "run": "采集或导出"}[mode]
+            self.status.set(f"{stage}失败 · {error}")
+            self.app._log(f"{stage}失败 · {error}", "err")
             return
         if mode in ("search", "remote_search"):
             query, self.results = result

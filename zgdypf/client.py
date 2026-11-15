@@ -13,11 +13,12 @@ from __future__ import annotations
 import json
 import os
 import random
+import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Mapping, Optional
 
@@ -50,6 +51,18 @@ class AccessLimited(HardError):
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def _opener(stop_on_redirect):
+    # Keep certificate validation, without inheriting a TLS key-log path from
+    # the launching environment. A stale path can prevent every HTTPS request.
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_default_certs(ssl.Purpose.SERVER_AUTH)
+    context.set_alpn_protocols(["http/1.1"])
+    handlers = [urllib.request.HTTPSHandler(context=context)]
+    if stop_on_redirect:
+        handlers.append(_NoRedirect())
+    return urllib.request.build_opener(*handlers).open
 
 
 @dataclass
@@ -110,10 +123,7 @@ class Client:
         self.raw_dir = raw_dir
         self.dry = dry
         self.request_guard = request_guard
-        self._open = (
-            urllib.request.build_opener(_NoRedirect()).open
-            if request_guard else urllib.request.urlopen
-        )
+        self._open = _opener(request_guard is not None)
         self.headers = {
             "User-Agent": _USER_AGENT,
             "X-Requested-With": "XMLHttpRequest",

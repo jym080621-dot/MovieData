@@ -2,7 +2,9 @@
 import csv
 import io
 import json
+import os
 import sqlite3
+import ssl
 import tempfile
 import unittest
 import urllib.error
@@ -326,6 +328,23 @@ class MovieHistoryTests(unittest.TestCase):
         self.routes = [(200, [{"code": MOVIE, "name": "电影测试"}, {"code": MOVIE, "name": "电影测试"}])]
         self.assertEqual(history.search_films(self.root, "电影测试", client_factory=self.client),
                          [(MOVIE, "电影测试")])
+
+    def test_missing_tls_key_log_directory_does_not_break_film_search(self):
+        stale_path = self.root / "moved-away" / "ssl.keys"
+        self.routes = [(200, [{"code": MOVIE, "name": "热辣滚烫"}])]
+        with patch.dict(os.environ, {"SSLKEYLOGFILE": str(stale_path)}):
+            hits = history.search_films(self.root, "热辣滚烫", client_factory=self.client)
+            self.assertEqual(os.environ["SSLKEYLOGFILE"], str(stale_path))
+        self.assertEqual(hits, [(MOVIE, "热辣滚烫")])
+        self.assertEqual(len(self.calls), 1)
+        self.assertFalse(stale_path.exists())
+
+    def test_guarded_client_keeps_tls_certificate_and_hostname_validation(self):
+        with patch("zgdypf.client.urllib.request.build_opener") as build:
+            Client(request_guard=lambda: None)
+        handler = build.call_args.args[0]
+        self.assertEqual(handler._context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(handler._context.check_hostname)
 
 
 if __name__ == "__main__":

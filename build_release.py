@@ -17,16 +17,18 @@ import argparse
 import datetime as dt
 import os
 import shutil
+import ssl
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.3.1"
+VER = "1.3.2"
 DATE = dt.date.today().strftime("%Y%m%d")
 APP_NAME = "MovieData"
 EXE = os.path.join(DIST, APP_NAME + ".exe")
@@ -86,6 +88,11 @@ def build_exe() -> None:
            "--onefile", "--windowed", "--name", APP_NAME,
            "--distpath", DIST, "--workpath", os.path.join(ROOT, "build"),
            "--specpath", os.path.join(ROOT, "build"), "gui.py"]
+    # Some build runtimes reference an extra trust-policy file beside ssl.py.
+    # Keep it beside the frozen ssl module to preserve that policy at runtime.
+    trust_policy = Path(ssl.__file__).with_name("codex-rejected-cas.pem")
+    if trust_policy.is_file():
+        cmd[-1:-1] = ["--add-data", f"{trust_policy}{os.pathsep}."]
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
