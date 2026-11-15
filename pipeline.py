@@ -18,6 +18,7 @@ import argparse
 import csv
 import datetime as dt
 import os
+import sqlite3
 import sys
 import time
 from typing import List, Optional
@@ -25,10 +26,11 @@ from typing import List, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import api, db
+from zgdypf import api, db, movie_history
 from zgdypf import app_root as _app_root
 from zgdypf import sample as samp
-from zgdypf.client import Client, HardError, RetryExhausted
+from zgdypf.cinema_detail import collect, defer_empty, reusable_slices
+from zgdypf.client import BadPayload, Client, HardError, RetryExhausted
 from zgdypf.parse import parse_count, parse_money, parse_ratio, unit_money
 
 ROOT = _app_root()
@@ -370,112 +372,55 @@ def cmd_box(args) -> int:
         return 1
 
     job = "cinema_box"
-    done = db.ledger_done(conn, job)
-    total_plan = len(dates) * len(codes)
-    print(f"样本 {len(codes)} × 天 {len(dates)} = {total_plan} 个任务；已完成 {len(done & {f'{c}|{d}' for d in dates for c in codes})}")
-    print(f"限速 {args.rate} req/s，预算 {args.budget_min if args.budget_min else '∞'} 分钟")
-
-    started = time.time()
-    n_ok = n_empty = n_err = n_warn = n_skip_date = 0
-    for di, date in enumerate(dates, 1):
-        pending = [c for c in codes if f"{c}|{date}" not in done]
+    print(f"影院 {len(codes)} × 天 {len(dates)} = {est} 个任务")
+    started = time.monotonic()
+    totals = {"ok": 0, "empty": 0, "error": 0, "skip_date": 0}
+    for day in dict.fromkeys(dates):
+        if args.budget_min and time.monotonic() - started >= args.budget_min * 60:
+            break
+        reusable = reusable_slices(conn, day)
+        pending = [
+            code for code in dict.fromkeys(codes)
+            if code not in reusable and (args.retry_empty or not defer_empty(conn, code, day))
+        ]
         if not pending:
             continue
-        if args.budget_min and (time.time() - started) / 60 >= args.budget_min:
-            print(f"⏸ 预算用尽，停在 {date} 之前")
-            break
-
-        # —— 按日开闸：该日影院数据若正处重建窗口，整日跳过，绝不写入 204
         try:
-            full, n_probe = date_is_full(client, date)
-        except (HardError, RetryExhausted) as exc:
-            db.put_date_status(conn, date, None, "error", str(exc))
-            conn.commit()
-            n_skip_date += 1
-            print(f"  [{di}/{len(dates)}] {date}  探测失败，跳过: {exc}")
+            full, n_probe = date_is_full(client, day)
+        except (HardError, RetryExhausted, BadPayload) as exc:
+            with conn:
+                db.put_date_status(conn, day, None, "error", str(exc))
+            totals["skip_date"] += 1
+            print(f"  {day} 探测失败，跳过 · {exc}")
             continue
         if not full:
-            db.put_date_status(conn, date, n_probe, "thin", "开闸探测不完整")
-            db.log(conn, job, "warn", f"{date} 开闸不完整({n_probe})，整日跳过")
-            conn.commit()
-            n_skip_date += 1
-            print(f"  [{di}/{len(dates)}] {date}  ⚠ 该日影院维度不完整({n_probe})，整日跳过")
+            with conn:
+                db.put_date_status(conn, day, n_probe, "thin", "开闸探测不完整")
+            totals["skip_date"] += 1
+            print(f"  {day} 影院榜探测不完整，跳过")
             continue
 
-        d_ok = d_empty = d_err = 0
-        t_date = time.time()
+        consecutive_empty = 0
         for code in pending:
-            if args.budget_min and (time.time() - started) / 60 >= args.budget_min:
+            if args.budget_min and time.monotonic() - started >= args.budget_min * 60:
                 break
-            key = f"{code}|{date}"
             try:
-                box = api.cinema_box(client, code, date)
-            except HardError as exc:
-                db.ledger_put(conn, job, key, "error", err=str(exc)[:300])
-                d_err += 1
-                continue
-            except RetryExhausted as exc:
-                db.ledger_put(conn, job, key, "error", err=str(exc)[:300])
-                d_err += 1
-                continue
-
-            if box is None:
-                db.ledger_put(conn, job, key, "empty", http_status=204)
-                d_empty += 1
-            else:
-                movies = box.get("movieSalesList") or []
-                mcount = box.get("movieCount")
-                if mcount is not None and mcount != len(movies):
-                    n_warn += 1
-                    db.log(conn, job, "warn", f"{key} movieCount={mcount} != rows={len(movies)}")
-                db.clear_cinema_day_movies(conn, code, date, mcount)
-                total = 0
-                for m in movies:
-                    fen = int(m["sales"]) if isinstance(m.get("sales"), (int, float)) else None
-                    total += fen or 0
-                    sm = parse_money(m.get("sumSalesDesc"))
-                    db.upsert_cinema_movie(conn, {
-                        "cinema_code": code, "date": date,
-                        "movie_code": m.get("movieCode"), "movie_name": m.get("movieName"),
-                        "release_day": m.get("releaseDay"), "sales_fen": fen,
-                        "sales_rate": parse_ratio(m.get("salesRateDesc")),
-                        "session_count_rate": parse_ratio(m.get("sessionCountRateDesc")),
-                        "sum_sales_text": m.get("sumSalesDesc"),
-                        "sum_sales_yuan": sm.yuan if sm else None,
-                        "movie_count": mcount, "cinema_sales_fen": None,
-                    })
-                db.upsert_cinema_day(conn, {
-                    "cinema_code": code, "date": date, "sales_fen": total, "sales_src": "box",
-                    "sales_lossy": 0,
-                    "sessions": box.get("sessionCount"), "sessions_lossy": 0,
-                    "movie_count": mcount, "new_movie_count": box.get("newMovieCount"),
-                })
-                db.ledger_put(conn, job, key, "ok", http_status=200)
-                d_ok += 1
-
-        # —— 可疑日回滚：空值率过高说明该日在采集中途塌陷，撤销本题
-        n_ok += d_ok
-        n_empty += d_empty
-        n_err += d_err
-        seen = d_ok + d_empty
-        suspect = seen >= 10 and d_empty / max(seen, 1) > 0.5
-        if suspect:
-            conn.execute(
-                "DELETE FROM collect_ledger WHERE job=? AND key LIKE ? AND status='empty'",
-                (job, f"%|{date}"))
-            db.log(conn, job, "warn",
-                   f"{date} 空值率 {d_empty}/{seen}，判定为采集期塌陷，已撤销待重抓")
-        if not suspect:
-            db.put_date_status(conn, date, None, "full")
-        conn.commit()
-        print(f"  [{di}/{len(dates)}] {date}  ok={d_ok} empty={d_empty} err={d_err}  "
-              f"{time.time()-t_date:.0f}s {'⚠SUSPECT' if suspect else ''}", flush=True)
-
-    conn.commit()
-    print(f"✓ 结束：ok={n_ok} empty={n_empty} err={n_err} warn={n_warn} 跳过日={n_skip_date}  "
-          f"用时 {(time.time()-started)/60:.1f} min")
-    db.log(conn, job, "info", f"ok={n_ok} empty={n_empty} err={n_err} skip_date={n_skip_date}")
-    conn.commit()
+                status, _ = collect(conn, client, code, day)
+                totals[status] += 1
+                consecutive_empty = consecutive_empty + 1 if status == "empty" else 0
+            except (HardError, RetryExhausted, BadPayload) as exc:
+                with conn:
+                    db.ledger_put(conn, job, f"{code}|{day}", "error", err=str(exc)[:300])
+                totals["error"] += 1
+                consecutive_empty = 0
+            if consecutive_empty >= 3:
+                print(f"  {day} 连续 3 个 204，暂停该日")
+                break
+        print(f"  {day} 累计 {totals}", flush=True)
+    with conn:
+        db.log(conn, job, "info", str(totals))
+    conn.close()
+    print(f"结束 · {totals}")
     return 0
 
 
@@ -557,6 +502,42 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_movie_history(args) -> int:
+    codes = movie_history.parse_codes(args.cinemas)
+    selection = (args.code, args.start, args.end, args.scope, codes)
+    try:
+        if args.mode == "repair":
+            options = {"retry_empty": args.retry_empty, "recheck_days": args.recheck_days}
+            plan = movie_history.plan_totals(args.db, *selection, **options)
+            print(f"范围 {plan['targets']:,} 个影院日，可补 {plan['plannable']:,} 个，"
+                  f"涉及 {plan['probe_days']:,} 个探测日。"
+                  f"另有 {plan['missing_scope_days']:,} 天缺少可用影院范围，"
+                  f"{plan['cooldown_days']:,} 天暂缓重查。", flush=True)
+            print(f"每批最多 {args.max_requests} 次请求（含探针与重试），"
+                  f"本批{'执行' if args.apply else '只预览'}。", flush=True)
+            if not args.apply:
+                return 0
+            result = movie_history.repair(
+                args.db, args.raw, *selection, max_requests=args.max_requests,
+                rate=args.history_rate, minutes=args.minutes,
+                emit=lambda message: print(message, flush=True), **options,
+            )
+            print(f"实际请求 {result['requests']}，重试 {result['retries']}，"
+                  f"写入 {result.get('ok', 0)} 个影院日，待复核 204 {result.get('empty', 0)} 个。")
+            return int(bool(result.get("failed") or result.get("errors")))
+        result = movie_history.export_reports(
+            args.db, args.out, *selection, details=args.mode == "export"
+        )
+        if result["details"]:
+            print(f"明细 {result['detail_rows']:,} 行 · {result['details']}")
+        print(f"逐日审计 {result['days']:,} 天 · {result['audit']}")
+        print(f"缺口清单 · {result['gaps']}")
+        return 0
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        print(f"单片历史影院明细失败 · {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rate", type=float, default=2.0)
@@ -583,6 +564,7 @@ def main() -> int:
     p.add_argument("--all-cinemas", action="store_true", help="全量影院（约 1.2 万家，耗时以小时计）")
     p.add_argument("--yes", action="store_true", help="跳过大批量二次确认")
     p.add_argument("--budget-min", type=float, default=0)
+    p.add_argument("--retry-empty", action="store_true", help="重新核验已记为空的影院日")
     p.set_defaults(func=cmd_box)
 
     p = sub.add_parser("movie")
@@ -599,6 +581,27 @@ def main() -> int:
     p.add_argument("--no-tables", action="store_true")
     p.set_defaults(func=cmd_export)
 
+    history = sub.add_parser("movie-history", help="单片影院明细导出、审计与补采")
+    actions = history.add_subparsers(dest="mode", required=True)
+    for mode in ("export", "audit", "repair"):
+        p = actions.add_parser(mode)
+        p.add_argument("--code", required=True, help="数字影片编码，保留前导零")
+        p.add_argument("--start", required=True)
+        p.add_argument("--end", required=True)
+        p.add_argument("--scope", choices=movie_history.SCOPES, default="sample")
+        p.add_argument("--cinemas", default="", help="指定影院编码，以逗号分隔")
+        p.add_argument("--db", default=DB_PATH)
+        p.set_defaults(func=cmd_movie_history)
+        if mode in ("export", "audit"):
+            p.add_argument("--out", default=os.path.join(ROOT, "output", "movie_history"))
+        else:
+            p.add_argument("--apply", action="store_true", help="实际补采，省略时仅离线预览")
+            p.add_argument("--raw", default=RAW_DIR)
+            p.add_argument("--max-requests", type=int, default=20, help="本批请求总上限，含探测和重试")
+            p.add_argument("--rate", dest="history_rate", type=float, default=1.0)
+            p.add_argument("--minutes", type=float, default=10)
+            p.add_argument("--retry-empty", action="store_true", help="补完普通缺口后重新核验 204")
+            p.add_argument("--recheck-days", action="store_true", help="重查过去 24 小时探针未过的日期")
     args = ap.parse_args()
     return args.func(args)
 

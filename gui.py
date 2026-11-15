@@ -23,7 +23,7 @@ from tkinter import messagebox, ttk
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import app_root, datasets, db
+from zgdypf import app_root, datasets, db, movie_history
 from zgdypf.client import Client
 
 ROOT = app_root()
@@ -284,9 +284,10 @@ class App(tk.Tk):
         ttk.Button(row, text="打开目录", width=10, command=self._open_dir).pack(side="left")
         self.btn_export = ttk.Button(row, text="导出结果", width=10, command=self._export)
         self.btn_export.pack(side="left", padx=(8, 0))
-
         bar = ttk.Frame(card, style="Card.TFrame")
         bar.pack(fill="x", pady=(10, 0))
+        self.btn_history = ttk.Button(bar, text="单片历史影院", command=self._history_dialog)
+        self.btn_history.pack(side="right", padx=(8, 0))
         self.pb = ttk.Progressbar(bar, mode="determinate", maximum=100)
         self.pb.pack(side="left", fill="x", expand=True)
         self.lbl_prog = ttk.Label(bar, text="就绪", style="Card.TLabel", width=20, anchor="e")
@@ -492,6 +493,113 @@ class App(tk.Tk):
                   f"{opts['rate']} req/s", "head")
         threading.Thread(target=self._worker, args=(sel, opts), daemon=True).start()
 
+    def _history_dialog(self):
+        if self._running:
+            return
+        pane = tk.Toplevel(self)
+        pane.title("单片历史影院")
+        pane.transient(self)
+        pane.grab_set()
+        form = ttk.Frame(pane, padding=14)
+        form.pack(fill="both", expand=True)
+        scope_map = {"当前样本": "sample", "本地日影院榜": "ranklist", "指定影院": "explicit"}
+        prompts = (
+            ("影片编码", "", "保留前导零"),
+            ("开始日期", self.v_start.get(), "YYYY-MM-DD"),
+            ("结束日期", self.v_end.get(), "YYYY-MM-DD"),
+            ("审计及补采范围", "当前样本", ""),
+            ("影院编码", "", "指定影院模式使用，以逗号分隔"),
+            ("每批请求上限", "20", "包含日期探针与重试"),
+        )
+        values = []
+        for index, (label, initial, hint) in enumerate(prompts):
+            value = tk.StringVar(pane, initial)
+            values.append(value)
+            ttk.Label(form, text=label).grid(row=index, column=0, sticky="w", pady=3)
+            if label == "审计及补采范围":
+                entry = ttk.Combobox(form, textvariable=value, values=tuple(scope_map), state="readonly", width=22)
+            else:
+                entry = ttk.Entry(form, textvariable=value, width=25)
+            entry.grid(row=index, column=1, sticky="ew", padx=8)
+            ttk.Label(form, text=hint).grid(row=index, column=2, sticky="w")
+        retry_empty = tk.BooleanVar(pane, False)
+        ttk.Checkbutton(form, text="同时复核 HTTP 204", variable=retry_empty).grid(
+            row=6, column=0, columnspan=3, sticky="w", pady=3
+        )
+        recheck_days = tk.BooleanVar(pane, False)
+        ttk.Checkbutton(form, text="提前重查暂缓日期", variable=recheck_days).grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=3
+        )
+        ttk.Label(form, text="导出包含该片全部已存明细。指定影院补采可直接联网查询。").grid(
+            row=8, column=0, columnspan=3, sticky="w", pady=6
+        )
+        controls = ttk.Frame(form)
+        controls.grid(row=9, column=0, columnspan=3, sticky="w")
+
+        def launch(mode):
+            movie, start, end, scope_name, criteria, cap = (v.get().strip() for v in values)
+            selection = movie, start, end, scope_map[scope_name], movie_history.parse_codes(criteria)
+            try:
+                movie_history.validate(*selection)
+                if not os.path.isfile(DB_PATH):
+                    raise ValueError("请先将 boxoffice.db 副本放在采集器目录")
+                budget = 20
+                if mode == "repair":
+                    budget = int(cap)
+                    if budget < 1:
+                        raise ValueError("请求上限须为正整数")
+                    if dt.date.fromisoformat(end) >= dt.date.today():
+                        raise ValueError("历史补采的结束日期须早于今天")
+            except ValueError as exc:
+                messagebox.showerror("参数有误", str(exc), parent=pane)
+                return
+            if mode == "repair" and not messagebox.askyesno(
+                    "确认补采",
+                    (f"本批最多发送 {budget} 次请求，每秒最多 1 次，时间预算 10 分钟。\n"
+                     + ("将直接查询指定影院的当日片目。\n" if selection[3] == "explicit" else "")
+                     + "继续补采？"),
+                    parent=pane):
+                return
+            options = {"retry_empty": retry_empty.get(), "recheck_days": recheck_days.get()}
+            pane.destroy()
+            self._running = True
+            self._stop = threading.Event()
+            for button in (self.btn_start, self.btn_est, self.btn_history):
+                button.configure(state="disabled")
+            self.btn_stop.configure(state="normal" if mode == "repair" else "disabled")
+            self.lbl_status.configure(text="正在处理单片历史影院数据…")
+            self.lbl_prog.configure(text="处理中…")
+            threading.Thread(target=self._history_worker, args=(mode, selection, budget, options),
+                             daemon=True).start()
+
+        for label, mode in (("导出和审计", "export"), ("预览缺口", "preview"), ("补采缺口", "repair")):
+            ttk.Button(controls, text=label, command=lambda m=mode: launch(m)).pack(side="left", padx=3)
+
+    def _history_worker(self, mode, selection, budget, options):
+        try:
+            if mode != "export":
+                plan = movie_history.plan_totals(DB_PATH, *selection, **options)
+                self._emit(f"单片历史影院 · 范围 {plan['targets']:,} 个影院日 · 可补 {plan['plannable']:,} 个 · "
+                           f"待复核 204 {plan['deferred']:,} 个 · {plan['missing_scope_days']:,} 天缺少可用影院范围 · "
+                           f"{plan['cooldown_days']:,} 天暂缓重查")
+            if mode == "repair":
+                result = movie_history.repair(
+                    DB_PATH, RAW_DIR, *selection, max_requests=budget,
+                    stopped=self._stop.is_set, emit=self._emit, **options,
+                )
+                self._emit(f"请求 {result['requests']} 次 · 保存 {result.get('ok', 0)} 个影院日 · "
+                           f"本批待复核 204 {result.get('empty', 0)} 个")
+            if mode in ("export", "repair"):
+                result = movie_history.export_reports(
+                    DB_PATH, os.path.join(ROOT, "output", "movie_history"), *selection
+                )
+                self._emit(f"明细 {result['detail_rows']:,} 行 · {result['details']}")
+                self._emit(f"逐日审计 · {result['audit']}")
+                self._emit(f"缺口清单 · {result['gaps']}")
+            self.q.put(("history_done",))
+        except Exception as exc:
+            self.q.put(("error", f"单片历史影院明细失败 · {exc}", ""))
+
     def _stop_click(self):
         self._stop.set()
         self._log("正在停止（当前请求完成后退出）…", "warn")
@@ -545,6 +653,10 @@ class App(tk.Tk):
                     self.lbl_prog.configure(text=f"{done:,} / {total:,}  {pct:.0f}%")
                 elif k == "done":
                     self._finish(m[1], m[2], m[3])
+                elif k == "history_done":
+                    self.lbl_status.configure(text="单片历史影院处理结束")
+                    self.lbl_prog.configure(text="就绪")
+                    self._reset()
                 elif k == "exported":
                     self.btn_export.configure(state="normal")
                     self._log(f"导出完成：{m[1]['movies']} 部影片 · {m[1].get('cinemas', 0)} 家影院 · "
@@ -587,6 +699,7 @@ class App(tk.Tk):
         self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.btn_est.configure(state="normal")
+        self.btn_history.configure(state="normal")
 
     def _log(self, msg, level="info"):
         ts = dt.datetime.now().strftime("%H:%M:%S")

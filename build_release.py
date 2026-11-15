@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.0"
+VER = "1.1"
 DATE = dt.date.today().strftime("%Y%m%d")
 APP_NAME = "电影票房采集器"
 EXE = os.path.join(DIST, APP_NAME + ".exe")
@@ -34,11 +34,12 @@ EXE = os.path.join(DIST, APP_NAME + ".exe")
 SRC_FILES = [
     "gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
     "启动采集器.bat", "启动说明.txt",
-    "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md",
+    "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
+    "tests/test_movie_history.py",
     "sample.csv",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png"]
-PKG_FILES = ["使用教程.md", "README.md", "启动说明.txt", "ui_all.png"]
+PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================

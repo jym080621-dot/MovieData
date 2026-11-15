@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional
 from . import api, db
 from . import sample as samp
 from .common import MIN_CINEMAS, date_is_full, daterange, rank_row, to_float
+from .cinema_detail import GUI_JOB, collect, defer_empty, reusable_slices
 from .client import BadPayload, Client, HardError, RetryExhausted
 from .parse import parse_count, parse_money, parse_ratio, unit_money
 
@@ -431,33 +432,8 @@ def _run_cinema_sum(ctx: Ctx, t: Task) -> str:
 
 
 def _run_cinema_box(ctx: Ctx, t: Task) -> str:
-    box = api.cinema_box(ctx.client, t.entity, t.date)
-    if box is None:
-        return "无数据"
-    movies = box.get("movieSalesList") or []
-    mcount = box.get("movieCount")
-    db.clear_cinema_day_movies(ctx.conn, t.entity, t.date, mcount)
-    total = 0
-    for m in movies:
-        fen = int(m["sales"]) if isinstance(m.get("sales"), (int, float)) else None
-        total += fen or 0
-        sm = parse_money(m.get("sumSalesDesc"))
-        db.upsert_cinema_movie(ctx.conn, {
-            "cinema_code": t.entity, "date": t.date,
-            "movie_code": m.get("movieCode"), "movie_name": m.get("movieName"),
-            "release_day": m.get("releaseDay"), "sales_fen": fen,
-            "sales_rate": parse_ratio(m.get("salesRateDesc")),
-            "session_count_rate": parse_ratio(m.get("sessionCountRateDesc")),
-            "sum_sales_text": m.get("sumSalesDesc"),
-            "sum_sales_yuan": sm.yuan if sm else None,
-            "movie_count": mcount,
-        })
-    db.upsert_cinema_day(ctx.conn, {
-        "cinema_code": t.entity, "date": t.date, "sales_fen": total, "sales_src": "box",
-        "sales_lossy": 0, "sessions": box.get("sessionCount"), "sessions_lossy": 0,
-        "movie_count": mcount, "new_movie_count": box.get("newMovieCount"),
-    })
-    return f"{len(movies)} 部 / {total/100:,.0f} 元"
+    result, count = collect(ctx.conn, ctx.client, t.entity, t.date, GUI_JOB)
+    return "无数据" if result == "empty" else f"{count} 部"
 
 
 def _run_cinema_manage(ctx: Ctx, t: Task) -> str:
@@ -794,8 +770,6 @@ class Engine:
     def plan(self, selected: List[str]) -> List[tuple]:
         """返回 [(dataset, [Task])]，会触发前置数据准备。"""
         needs = {BY_ID[s].mode for s in selected}
-        if needs & {"per_cinema", "daily_cinema"}:
-            self.ctx.ensure_sample()
         if needs & {"per_chain", "daily_chain"}:
             self.ctx.chains()
         out = []
@@ -824,9 +798,13 @@ class Engine:
             if self.stop.is_set() or over_budget():
                 break
             finished = set()
-            if skip_done:
+            if skip_done and ds_id != "cinema_box":
                 finished = db.ledger_done(conn, f"ds:{ds_id}")
             self.ctx.emit(f"▶ {BY_ID[ds_id].name}：{len(tasks)} 个任务")
+            last_day = None
+            slices = {}
+            day_available = None
+            consecutive_empty = 0
             for i, t in enumerate(tasks, 1):
                 if self.stop.is_set():
                     self.ctx.emit("⏹ 已停止")
@@ -836,16 +814,46 @@ class Engine:
                     self.ctx.emit(f"⏸ 时间预算 {budget_min:.0f} 分钟用尽，"
                                   f"已处理 {done}/{total}；再次开始会从缺口继续")
                     break
-                if t.key in finished:
+                if ds_id == "cinema_box" and t.date != last_day:
+                    last_day = t.date
+                    slices = reusable_slices(conn, t.date) if skip_done else {}
+                    day_available = None
+                    consecutive_empty = 0
+                resumed = t.key in finished
+                if ds_id == "cinema_box" and skip_done:
+                    resumed = t.entity in slices or defer_empty(conn, t.entity, t.date)
+                if resumed or (ds_id == "cinema_box" and day_available is False):
                     stat["skip"] += 1
                     done += 1
                     on_progress(done, total)
                     continue
+                if ds_id == "cinema_box" and day_available is None:
+                    conn.commit()
+                    try:
+                        day_available, _ = date_is_full(self.ctx.client, t.date)
+                    except (HardError, RetryExhausted, BadPayload) as exc:
+                        day_available = False
+                        self.ctx.emit(f"  ⚠ {t.date} 影院榜探测失败 · {exc}")
+                    if not day_available:
+                        self.ctx.emit(f"  ⚠ {t.date} 影院榜探测未通过，跳过该日")
+                        stat["skip"] += 1
+                        done += 1
+                        on_progress(done, total)
+                        continue
+                    if self.stop.is_set() or over_budget():
+                        stat["budget"] = int(over_budget())
+                        break
                 try:
                     status = RUNNERS[ds_id](self.ctx, t)
                     st = "empty" if status in ("无数据", "空") else "ok"
                     stat[st] += 1
-                    _finish(conn, ds_id, t, "ok" if st == "ok" else "empty")
+                    if ds_id == "cinema_box":
+                        consecutive_empty = consecutive_empty + 1 if st == "empty" else 0
+                        if consecutive_empty >= 3:
+                            day_available = False
+                            self.ctx.emit(f"  ⚠ {t.date} 连续 3 个 204，暂停该日")
+                    else:
+                        _finish(conn, ds_id, t, st)
                 except HardError as exc:
                     db.ledger_put(conn, f"ds:{ds_id}", t.key, "error", err=str(exc)[:200])
                     status, stat["err"] = "参数错误", stat["err"] + 1
@@ -855,6 +863,10 @@ class Engine:
                 except Exception as exc:  # 软失败：单点异常不中断整批
                     db.ledger_put(conn, f"ds:{ds_id}", t.key, "error", err=repr(exc)[:200])
                     status, stat["err"] = f"异常:{type(exc).__name__}", stat["err"] + 1
+                if ds_id == "cinema_box":
+                    conn.commit()
+                    if status in ("参数错误", "失败") or status.startswith("异常:"):
+                        consecutive_empty = 0
                 done += 1
                 on_progress(done, total)
                 if i % 20 == 0 or i == len(tasks):
