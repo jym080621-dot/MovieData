@@ -155,25 +155,6 @@ CREATE TABLE IF NOT EXISTS collect_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_status ON collect_ledger(job, status);
 
-CREATE TABLE IF NOT EXISTS history_cinema_roster (
-    date TEXT NOT NULL,
-    cinema_code TEXT NOT NULL,
-    source TEXT NOT NULL,
-    run_id TEXT,
-    seen_at TEXT NOT NULL,
-    PRIMARY KEY(date, cinema_code, source)
-);
-
-CREATE TABLE IF NOT EXISTS history_roster_refresh (
-    date TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    next_offset INTEGER NOT NULL,
-    pages INTEGER NOT NULL,
-    row_count INTEGER NOT NULL,
-    checked_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS date_status (
     date         TEXT PRIMARY KEY,
     n_cinemas    INTEGER,
@@ -359,9 +340,7 @@ def upsert_cinema_day(conn: sqlite3.Connection, r: dict) -> None:
         ":online_rate_desc,:avg_seat_output,:avg_seat_desc,:avg_per_session,"
         ":movie_count,:new_movie_count,:ingested_at)"
         " ON CONFLICT(cinema_code,date) DO UPDATE SET"
-        " sales_fen=CASE WHEN fact_cinema_day.sales_src='box' AND excluded.sales_src='ranklist'"
-        "   THEN fact_cinema_day.sales_fen"
-        "   ELSE COALESCE(excluded.sales_fen, fact_cinema_day.sales_fen) END,"
+        " sales_fen=COALESCE(excluded.sales_fen, fact_cinema_day.sales_fen),"
         " sales_src=CASE WHEN excluded.sales_src='box' THEN 'box' ELSE fact_cinema_day.sales_src END,"
         " sales_lossy=CASE WHEN excluded.sales_src='box' THEN 0"
         "   ELSE MIN(excluded.sales_lossy, COALESCE(fact_cinema_day.sales_lossy,1)) END,"

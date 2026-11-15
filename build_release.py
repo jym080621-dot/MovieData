@@ -17,58 +17,56 @@ import argparse
 import datetime as dt
 import os
 import shutil
-import ssl
 import subprocess
 import sys
 import zipfile
-from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.3.3"
+VER = "1.0"
 DATE = dt.date.today().strftime("%Y%m%d")
-APP_NAME = "MovieData"
+APP_NAME = "电影票房采集器"
 EXE = os.path.join(DIST, APP_NAME + ".exe")
 
 SRC_FILES = [
-    "gui.py", "history_quick_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
-    "启动采集器.bat", "启动单片全国历史.bat", "launch_source.bat", "启动说明.txt",
-    "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
-    "tests/test_movie_history.py",
+    "gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
+    "启动采集器.bat", "启动说明.txt",
+    "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md",
     "sample.csv",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png"]
-PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png"]
+PKG_FILES = ["使用教程.md", "README.md", "启动说明.txt", "ui_all.png"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================
 
 一、怎么启动
-   先完整解压，再双击「{name}.exe」。本包自带运行环境。
-   若只用单片全国历史，双击「打开单片全国历史.bat」进入快捷窗口。
+   双击「{name}.exe」即可，无需安装 Python，无需联网安装依赖。
 
 二、数据存在哪
-   采集时在本文件所在目录创建：
+   首次启动会在 **本文件所在目录** 自动创建：
        boxoffice.db     数据库（所有采集结果）
        raw/             原始接口响应，用于回溯
        output/          导出的 CSV / JSON
-   已有进度时，关闭旧程序后，把 boxoffice.db 放到 {name}.exe 同一目录。
-   数据库随程序目录一起复制才能带走已有进度。本程序包不含历史数据库。
-   如目录无法写入，把整个解压目录移到有写入权限的位置再采集。
+   整个目录可以直接复制走（含数据），换台电脑继续用。
 
 三、需要什么
    能访问 https://zgdypf.zgdypw.cn 的网络。
    除此之外不需要任何东西——不用装 Python，不用装库。
 
-四、第一次用
+四、杀毒软件拦截怎么办
+   这是 PyInstaller 打包的单文件程序，未做代码签名，部分杀软会误报。
+   加入白名单，或改用「源码包」里的 python 方式运行。
+
+五、第一次用
    1. 打开后先点「估算」，看清这一轮要发多少次请求；
    2. 想小试，就只勾「02 全国大盘」，一天只要 2 次请求；
    3. 完整用法见同目录的「使用教程.md」（每个选项、每个数字都有解释）。
 
-五、目录里都有什么
+六、目录里都有什么
    使用教程.md      完整使用手册（推荐先看）
    README.md        工程说明与设计取舍
    ui_all.png       界面截图
@@ -88,11 +86,6 @@ def build_exe() -> None:
            "--onefile", "--windowed", "--name", APP_NAME,
            "--distpath", DIST, "--workpath", os.path.join(ROOT, "build"),
            "--specpath", os.path.join(ROOT, "build"), "gui.py"]
-    # Some build runtimes reference an extra trust-policy file beside ssl.py.
-    # Keep it beside the frozen ssl module to preserve that policy at runtime.
-    trust_policy = Path(ssl.__file__).with_name("codex-rejected-cas.pem")
-    if trust_policy.is_file():
-        cmd[-1:-1] = ["--add-data", f"{trust_policy}{os.pathsep}."]
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
@@ -101,8 +94,6 @@ def make_program_dir() -> str:
     shutil.rmtree(pkg, ignore_errors=True)
     os.makedirs(pkg, exist_ok=True)
     shutil.copy2(EXE, os.path.join(pkg, APP_NAME + ".exe"))
-    with open(os.path.join(pkg, "打开单片全国历史.bat"), "w", encoding="ascii", newline="\r\n") as fh:
-        fh.write('@echo off\nstart "" "%~dp0' + APP_NAME + '.exe" --quick-history\n')
     for f in PKG_FILES:
         src = os.path.join(ROOT, f)
         if os.path.exists(src):

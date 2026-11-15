@@ -13,14 +13,12 @@ from __future__ import annotations
 import json
 import os
 import random
-import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
-from tempfile import NamedTemporaryFile
-from typing import Any, Callable, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Optional
 
 BASE = "https://zgdypf.zgdypw.cn"
 
@@ -42,27 +40,6 @@ class RetryExhausted(Exception):
 
 class BadPayload(Exception):
     """响应 200 但内容无法解析为 JSON（站点结构变更）。"""
-
-
-class AccessLimited(HardError):
-    """服务端拒绝访问或要求限流。"""
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def _opener(stop_on_redirect):
-    # Keep certificate validation, without inheriting a TLS key-log path from
-    # the launching environment. A stale path can prevent every HTTPS request.
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.load_default_certs(ssl.Purpose.SERVER_AUTH)
-    context.set_alpn_protocols(["http/1.1"])
-    handlers = [urllib.request.HTTPSHandler(context=context)]
-    if stop_on_redirect:
-        handlers.append(_NoRedirect())
-    return urllib.request.build_opener(*handlers).open
 
 
 @dataclass
@@ -112,7 +89,6 @@ class Client:
         backoff: tuple = (1, 4, 16),
         raw_dir: Optional[str] = None,
         dry: bool = False,
-        request_guard: Optional[Callable[[], None]] = None,
     ) -> None:
         self.base = base.rstrip("/")
         self.rate = max(rate, 0.0)
@@ -122,8 +98,6 @@ class Client:
         self.backoff = backoff
         self.raw_dir = raw_dir
         self.dry = dry
-        self.request_guard = request_guard
-        self._open = _opener(request_guard is not None)
         self.headers = {
             "User-Agent": _USER_AGENT,
             "X-Requested-With": "XMLHttpRequest",
@@ -153,18 +127,10 @@ class Client:
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        tmp = None
-        try:
-            with NamedTemporaryFile(dir=parent, suffix=".part", delete=False) as fh:
-                tmp = fh.name
-                fh.write(body)
-            os.replace(tmp, path)
-        finally:
-            if tmp:
-                try:
-                    os.unlink(tmp)
-                except FileNotFoundError:
-                    pass
+        tmp = path + ".part"
+        with open(tmp, "wb") as fh:
+            fh.write(body)
+        os.replace(tmp, path)
 
     # ---------- 请求 ----------
     def fetch(
@@ -185,13 +151,11 @@ class Client:
         last = "unknown"
         for attempt in range(1, self.retries + 1):
             self._throttle()
-            if self.request_guard:
-                self.request_guard()
             t0 = time.time()
             self.stats.requests += 1
             try:
                 req = urllib.request.Request(url, headers=self.headers)
-                with self._open(req, timeout=self.timeout) as resp:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     status = resp.status
                     body = resp.read()
                 elapsed = int((time.time() - t0) * 1000)
@@ -209,12 +173,6 @@ class Client:
                 return Response(path, url, status, body, data, attempt, elapsed)
 
             except urllib.error.HTTPError as exc:
-                if self.request_guard and (exc.code in (401, 403, 429) or 300 <= exc.code < 400):
-                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                    hint = f"，Retry-After={retry_after}" if retry_after else ""
-                    self.stats.hard_errors += 1
-                    exc.close()
-                    raise AccessLimited(f"HTTP {exc.code}{hint}，已停止本批请求") from exc
                 body = exc.read() or b""
                 elapsed = int((time.time() - t0) * 1000)
                 if raw_rel:
@@ -229,8 +187,6 @@ class Client:
                 raise
 
             if attempt < self.retries:
-                if self.request_guard:
-                    self.request_guard()
                 self.stats.retries += 1
                 time.sleep(self.backoff[min(attempt - 1, len(self.backoff) - 1)])
 

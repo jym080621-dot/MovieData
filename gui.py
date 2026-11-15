@@ -14,19 +14,17 @@ from __future__ import annotations
 import datetime as dt
 import os
 import queue
-import sqlite3
 import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import app_root, datasets, db, history_roster, movie_history
+from zgdypf import app_root, datasets, db
 from zgdypf.client import Client
-from history_quick_gui import QuickHistoryDialog
 
 ROOT = app_root()
 DB_PATH = os.path.join(ROOT, "boxoffice.db")
@@ -59,7 +57,6 @@ class App(tk.Tk):
         self._running = False
         self._t0 = 0.0
         self._total = 0
-        self.quick_defaults = None
 
         self._init_style()
         self._build()
@@ -103,11 +100,7 @@ class App(tk.Tk):
         ttk.Label(head, text="采集控制台", style="H1.TLabel").pack(side="left")
         ttk.Label(head, text="   数据源 zgdypf.zgdypw.cn（专资办口径）· 纯标准库 · 断点续跑",
                   style="Sub.TLabel").pack(side="left", padx=(4, 0))
-        database = os.path.basename(DB_PATH) if os.path.isfile(DB_PATH) else "尚未载入历史库"
-        ttk.Label(head, text=f"库：{database}", style="Sub.TLabel").pack(side="right")
-        self.btn_quick = ttk.Button(head, text="单片全国历史", style="Accent.TButton",
-                                    command=self._quick_history_dialog)
-        self.btn_quick.pack(side="right", padx=12)
+        ttk.Label(head, text=f"库：{os.path.basename(DB_PATH)}", style="Sub.TLabel").pack(side="right")
 
         body = ttk.Frame(self, padding=(18, 4, 18, 6))
         body.pack(fill="both", expand=True)
@@ -291,10 +284,9 @@ class App(tk.Tk):
         ttk.Button(row, text="打开目录", width=10, command=self._open_dir).pack(side="left")
         self.btn_export = ttk.Button(row, text="导出结果", width=10, command=self._export)
         self.btn_export.pack(side="left", padx=(8, 0))
+
         bar = ttk.Frame(card, style="Card.TFrame")
         bar.pack(fill="x", pady=(10, 0))
-        self.btn_history = ttk.Button(bar, text="单片历史影院", command=self._history_dialog)
-        self.btn_history.pack(side="right", padx=(8, 0))
         self.pb = ttk.Progressbar(bar, mode="determinate", maximum=100)
         self.pb.pack(side="left", fill="x", expand=True)
         self.lbl_prog = ttk.Label(bar, text="就绪", style="Card.TLabel", width=20, anchor="e")
@@ -500,165 +492,6 @@ class App(tk.Tk):
                   f"{opts['rate']} req/s", "head")
         threading.Thread(target=self._worker, args=(sel, opts), daemon=True).start()
 
-    def _quick_history_dialog(self):
-        if not self._running:
-            defaults = self.quick_defaults or ("", self.v_start.get(), self.v_end.get(), "20")
-            QuickHistoryDialog(
-                self, DB_PATH, RAW_DIR, os.path.join(ROOT, "output", "movie_history"), defaults,
-            )
-
-    def _check_data_folder(self):
-        """将移动后无法打开数据库的错误显示在窗口中。"""
-        if not os.path.isfile(DB_PATH):
-            self.lbl_status.configure(text="新目录 · 将旧 boxoffice.db 复制到程序同一目录可继续采集")
-            return
-        try:
-            with movie_history.open_readonly(DB_PATH) as conn:
-                conn.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
-        except (sqlite3.Error, OSError) as exc:
-            self.lbl_status.configure(text="无法读取数据库")
-            messagebox.showerror("无法读取数据库", f"{DB_PATH}\n\n{exc}", parent=self)
-
-    def _history_dialog(self, defaults=None):
-        if self._running:
-            return
-        pane = tk.Toplevel(self)
-        pane.title("单片历史影院")
-        pane.transient(self)
-        pane.grab_set()
-        form = ttk.Frame(pane, padding=14)
-        form.pack(fill="both", expand=True)
-        scope_map = {"当前样本": "sample", "本地日影院榜": "ranklist", "指定影院": "explicit",
-                     "逐日影院名单": "roster"}
-        movie, start, end, budget = defaults or ("", self.v_start.get(), self.v_end.get(), "20")
-        prompts = (
-            ("影片编码", movie, "保留前导零"),
-            ("开始日期", start, "YYYY-MM-DD"),
-            ("结束日期", end, "YYYY-MM-DD"),
-            ("审计及补采范围", "逐日影院名单", ""),
-            ("影院编码", "", "指定影院模式使用，以逗号分隔"),
-            ("每批请求上限", budget, "包含日期探针与重试"),
-        )
-        values = []
-        for index, (label, initial, hint) in enumerate(prompts):
-            value = tk.StringVar(pane, initial)
-            values.append(value)
-            ttk.Label(form, text=label).grid(row=index, column=0, sticky="w", pady=3)
-            if label == "审计及补采范围":
-                entry = ttk.Combobox(form, textvariable=value, values=tuple(scope_map), state="readonly", width=22)
-            else:
-                entry = ttk.Entry(form, textvariable=value, width=25)
-            entry.grid(row=index, column=1, sticky="ew", padx=8)
-            ttk.Label(form, text=hint).grid(row=index, column=2, sticky="w")
-        retry_empty = tk.BooleanVar(pane, False)
-        ttk.Checkbutton(form, text="同时复核 HTTP 204", variable=retry_empty).grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=3
-        )
-        recheck_days = tk.BooleanVar(pane, False)
-        ttk.Checkbutton(form, text="重查已更新榜单或暂缓日期", variable=recheck_days).grid(
-            row=7, column=0, columnspan=3, sticky="w", pady=3
-        )
-        ttk.Label(form, text="导出包含该片全部已存明细。指定影院补采可直接联网查询。").grid(
-            row=8, column=0, columnspan=3, sticky="w", pady=6
-        )
-        controls = ttk.Frame(form)
-        controls.grid(row=9, column=0, columnspan=3, sticky="w")
-        roster_controls = ttk.Frame(form)
-        roster_controls.grid(row=10, column=0, columnspan=3, sticky="w", pady=(8, 0))
-
-        def launch(mode):
-            movie, start, end, scope_name, criteria, cap = (v.get().strip() for v in values)
-            selection = movie, start, end, scope_map[scope_name], movie_history.parse_codes(criteria)
-            csv_path = None
-            try:
-                if mode == "refresh":
-                    history_roster.check_dates(start, end)
-                elif mode != "import":
-                    movie_history.validate(*selection)
-                if not os.path.isfile(DB_PATH):
-                    raise ValueError("请先将 boxoffice.db 副本放在采集器目录")
-                budget = 20
-                if mode in ("repair", "refresh"):
-                    budget = int(cap)
-                    if budget < 1:
-                        raise ValueError("请求上限须为正整数")
-                    if dt.date.fromisoformat(end) >= dt.date.today():
-                        raise ValueError("历史补采的结束日期须早于今天")
-            except ValueError as exc:
-                messagebox.showerror("参数有误", str(exc), parent=pane)
-                return
-            if mode in ("refresh", "repair") and not messagebox.askyesno(
-                    "确认更新每日影院名单" if mode == "refresh" else "确认补采",
-                    (f"本批最多发送 {budget} 次请求，每秒最多 1 次，时间预算 10 分钟。\n"
-                     + ("新版会合并影院名单并保留已有候选。\n" if mode == "refresh" else "")
-                     + ("将直接查询已知影院的当日片目。\n"
-                        if mode == "repair" and selection[3] in ("explicit", "roster") else "")
-                     + "继续执行？"),
-                    parent=pane):
-                return
-            if mode == "import":
-                csv_path = filedialog.askopenfilename(
-                    parent=pane, title="导入逐日影院名单", filetypes=[("CSV", "*.csv")]
-                )
-                if not csv_path:
-                    return
-            options = {"retry_empty": retry_empty.get(), "recheck_days": recheck_days.get()}
-            pane.destroy()
-            self._running = True
-            self._stop = threading.Event()
-            for button in (self.btn_start, self.btn_est, self.btn_history):
-                button.configure(state="disabled")
-            self.btn_stop.configure(state="normal" if mode in ("repair", "refresh") else "disabled")
-            self.lbl_status.configure(text="正在处理单片历史影院数据…")
-            self.lbl_prog.configure(text="处理中…")
-            threading.Thread(target=self._history_worker, args=(mode, selection, budget, options, csv_path),
-                             daemon=True).start()
-
-        for label, mode in (("导出和审计", "export"), ("预览缺口", "preview"), ("补采缺口", "repair")):
-            ttk.Button(controls, text=label, command=lambda m=mode: launch(m)).pack(side="left", padx=3)
-        for label, mode in (("联网更新名单", "refresh"), ("导入每日名单 CSV", "import")):
-            ttk.Button(roster_controls, text=label, command=lambda m=mode: launch(m)).pack(side="left", padx=3)
-
-    def _history_worker(self, mode, selection, budget, options, csv_path=None):
-        try:
-            if mode == "import":
-                result = history_roster.import_csv(DB_PATH, csv_path)
-                self._emit(f"名单已合并 · {result['days']:,} 天 · 输入 {result['records']:,} 个不重复影院日")
-            if mode == "refresh":
-                _, start, end, _, _ = selection
-                result = movie_history.refresh_roster(
-                    DB_PATH, RAW_DIR, start, end, max_requests=budget, stopped=self._stop.is_set,
-                    refresh_again=options["recheck_days"], emit=self._emit,
-                )
-                self._emit(f"名单请求 {result['requests']:,} 次 · 更新 {result.get('updated_days', 0):,} 天 · "
-                           f"复用 {result.get('skipped_days', 0):,} 天")
-            if mode in ("preview", "repair"):
-                plan = movie_history.plan_totals(DB_PATH, *selection, **options)
-                self._emit(f"单片历史影院 · 范围 {plan['targets']:,} 个影院日 · 可补 {plan['plannable']:,} 个 · "
-                           f"待复核 204 {plan['deferred']:,} 个 · {plan['missing_scope_days']:,} 天缺少可用影院范围 · "
-                           f"{plan['cooldown_days']:,} 天暂缓重查")
-                if selection[3] == "roster":
-                    self._emit(f"名单 · {plan['uncertain_roster_days']:,} 天缺少足量榜单证据 · 全国名单覆盖待核验")
-            if mode == "repair":
-                result = movie_history.repair(
-                    DB_PATH, RAW_DIR, *selection, max_requests=budget,
-                    stopped=self._stop.is_set, emit=self._emit, **options,
-                )
-                self._emit(f"请求 {result['requests']} 次 · 保存 {result.get('ok', 0)} 个影院日 · "
-                           f"本批待复核 204 {result.get('empty', 0)} 个")
-            if mode in ("export", "repair"):
-                result = movie_history.export_reports(
-                    DB_PATH, os.path.join(ROOT, "output", "movie_history"), *selection
-                )
-                self._emit(f"明细 {result['detail_rows']:,} 行 · {result['details']}")
-                self._emit(f"逐日审计 · {result['audit']}")
-                self._emit(f"缺口清单 · {result['gaps']}")
-                if result["roster"]:
-                    self._emit(f"每日影院名单与来源 · {result['roster']}")
-            self.q.put(("history_done",))
-        except Exception as exc:
-            self.q.put(("error", f"单片历史影院明细失败 · {exc}", ""))
-
     def _stop_click(self):
         self._stop.set()
         self._log("正在停止（当前请求完成后退出）…", "warn")
@@ -712,16 +545,6 @@ class App(tk.Tk):
                     self.lbl_prog.configure(text=f"{done:,} / {total:,}  {pct:.0f}%")
                 elif k == "done":
                     self._finish(m[1], m[2], m[3])
-                elif k == "history_done":
-                    self.lbl_status.configure(text="单片历史影院处理结束")
-                    self.lbl_prog.configure(text="就绪")
-                    self._reset()
-                elif k == "quick_status":
-                    m[1].status.set(m[2])
-                elif k == "quick_counts":
-                    m[1].show_counts(*m[2:])
-                elif k == "quick_result":
-                    m[1].finish(m[2], m[3], m[4])
                 elif k == "exported":
                     self.btn_export.configure(state="normal")
                     self._log(f"导出完成：{m[1]['movies']} 部影片 · {m[1].get('cinemas', 0)} 家影院 · "
@@ -764,7 +587,6 @@ class App(tk.Tk):
         self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.btn_est.configure(state="normal")
-        self.btn_history.configure(state="normal")
 
     def _log(self, msg, level="info"):
         ts = dt.datetime.now().strftime("%H:%M:%S")
@@ -783,10 +605,6 @@ def main() -> int:
     except Exception:
         pass
     app = App(selftest=selftest)
-    if not (selftest or demo):
-        app.after(150, app._check_data_folder)
-    if "--quick-history" in sys.argv:
-        app.after(100, app._quick_history_dialog)
     if selftest:
         app.withdraw()
         app.v_start.set(_yesterday())

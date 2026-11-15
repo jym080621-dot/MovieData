@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from . import ssr as ssr_mod
-from .client import Client, Response
+from .client import Client
 
 
 def _rel(*parts: str) -> str:
@@ -85,12 +85,6 @@ def cinema_box(c: Client, code: str, date: str) -> Optional[dict]:
     """影院 × 影片 × 日。无数据时返回 None（HTTP 204）。"""
     return c.get_json("/getCinemaBoxData", {"cinemaCode": code, "date": date},
                       raw_rel=_rel("cinema_box", date, code))
-
-
-def cinema_box_response(c: Client, code: str, date: str) -> Response:
-    """保留状态码，区分 204 和内容缺失的 HTTP 200。"""
-    return c.fetch("/getCinemaBoxData", {"cinemaCode": code, "date": date},
-                   raw_rel=_rel("cinema_box", date, code))
 
 
 def cinema_sum(c: Client, code: str, date: str) -> dict:
