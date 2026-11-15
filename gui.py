@@ -18,12 +18,12 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import app_root, datasets, db, movie_history
+from zgdypf import app_root, datasets, db, history_roster, movie_history
 from zgdypf.client import Client
 
 ROOT = app_root()
@@ -502,12 +502,13 @@ class App(tk.Tk):
         pane.grab_set()
         form = ttk.Frame(pane, padding=14)
         form.pack(fill="both", expand=True)
-        scope_map = {"当前样本": "sample", "本地日影院榜": "ranklist", "指定影院": "explicit"}
+        scope_map = {"当前样本": "sample", "本地日影院榜": "ranklist", "指定影院": "explicit",
+                     "逐日影院名单": "roster"}
         prompts = (
             ("影片编码", "", "保留前导零"),
             ("开始日期", self.v_start.get(), "YYYY-MM-DD"),
             ("结束日期", self.v_end.get(), "YYYY-MM-DD"),
-            ("审计及补采范围", "当前样本", ""),
+            ("审计及补采范围", "逐日影院名单", ""),
             ("影院编码", "", "指定影院模式使用，以逗号分隔"),
             ("每批请求上限", "20", "包含日期探针与重试"),
         )
@@ -527,7 +528,7 @@ class App(tk.Tk):
             row=6, column=0, columnspan=3, sticky="w", pady=3
         )
         recheck_days = tk.BooleanVar(pane, False)
-        ttk.Checkbutton(form, text="提前重查暂缓日期", variable=recheck_days).grid(
+        ttk.Checkbutton(form, text="重查已更新榜单或暂缓日期", variable=recheck_days).grid(
             row=7, column=0, columnspan=3, sticky="w", pady=3
         )
         ttk.Label(form, text="导出包含该片全部已存明细。指定影院补采可直接联网查询。").grid(
@@ -535,16 +536,22 @@ class App(tk.Tk):
         )
         controls = ttk.Frame(form)
         controls.grid(row=9, column=0, columnspan=3, sticky="w")
+        roster_controls = ttk.Frame(form)
+        roster_controls.grid(row=10, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         def launch(mode):
             movie, start, end, scope_name, criteria, cap = (v.get().strip() for v in values)
             selection = movie, start, end, scope_map[scope_name], movie_history.parse_codes(criteria)
+            csv_path = None
             try:
-                movie_history.validate(*selection)
+                if mode == "refresh":
+                    history_roster.check_dates(start, end)
+                elif mode != "import":
+                    movie_history.validate(*selection)
                 if not os.path.isfile(DB_PATH):
                     raise ValueError("请先将 boxoffice.db 副本放在采集器目录")
                 budget = 20
-                if mode == "repair":
+                if mode in ("repair", "refresh"):
                     budget = int(cap)
                     if budget < 1:
                         raise ValueError("请求上限须为正整数")
@@ -553,35 +560,58 @@ class App(tk.Tk):
             except ValueError as exc:
                 messagebox.showerror("参数有误", str(exc), parent=pane)
                 return
-            if mode == "repair" and not messagebox.askyesno(
-                    "确认补采",
+            if mode in ("refresh", "repair") and not messagebox.askyesno(
+                    "确认更新每日影院名单" if mode == "refresh" else "确认补采",
                     (f"本批最多发送 {budget} 次请求，每秒最多 1 次，时间预算 10 分钟。\n"
-                     + ("将直接查询指定影院的当日片目。\n" if selection[3] == "explicit" else "")
-                     + "继续补采？"),
+                     + ("新版会合并影院名单并保留已有候选。\n" if mode == "refresh" else "")
+                     + ("将直接查询已知影院的当日片目。\n"
+                        if mode == "repair" and selection[3] in ("explicit", "roster") else "")
+                     + "继续执行？"),
                     parent=pane):
                 return
+            if mode == "import":
+                csv_path = filedialog.askopenfilename(
+                    parent=pane, title="导入逐日影院名单", filetypes=[("CSV", "*.csv")]
+                )
+                if not csv_path:
+                    return
             options = {"retry_empty": retry_empty.get(), "recheck_days": recheck_days.get()}
             pane.destroy()
             self._running = True
             self._stop = threading.Event()
             for button in (self.btn_start, self.btn_est, self.btn_history):
                 button.configure(state="disabled")
-            self.btn_stop.configure(state="normal" if mode == "repair" else "disabled")
+            self.btn_stop.configure(state="normal" if mode in ("repair", "refresh") else "disabled")
             self.lbl_status.configure(text="正在处理单片历史影院数据…")
             self.lbl_prog.configure(text="处理中…")
-            threading.Thread(target=self._history_worker, args=(mode, selection, budget, options),
+            threading.Thread(target=self._history_worker, args=(mode, selection, budget, options, csv_path),
                              daemon=True).start()
 
         for label, mode in (("导出和审计", "export"), ("预览缺口", "preview"), ("补采缺口", "repair")):
             ttk.Button(controls, text=label, command=lambda m=mode: launch(m)).pack(side="left", padx=3)
+        for label, mode in (("联网更新名单", "refresh"), ("导入每日名单 CSV", "import")):
+            ttk.Button(roster_controls, text=label, command=lambda m=mode: launch(m)).pack(side="left", padx=3)
 
-    def _history_worker(self, mode, selection, budget, options):
+    def _history_worker(self, mode, selection, budget, options, csv_path=None):
         try:
-            if mode != "export":
+            if mode == "import":
+                result = history_roster.import_csv(DB_PATH, csv_path)
+                self._emit(f"名单已合并 · {result['days']:,} 天 · 输入 {result['records']:,} 个不重复影院日")
+            if mode == "refresh":
+                _, start, end, _, _ = selection
+                result = movie_history.refresh_roster(
+                    DB_PATH, RAW_DIR, start, end, max_requests=budget, stopped=self._stop.is_set,
+                    refresh_again=options["recheck_days"], emit=self._emit,
+                )
+                self._emit(f"名单请求 {result['requests']:,} 次 · 更新 {result.get('updated_days', 0):,} 天 · "
+                           f"复用 {result.get('skipped_days', 0):,} 天")
+            if mode in ("preview", "repair"):
                 plan = movie_history.plan_totals(DB_PATH, *selection, **options)
                 self._emit(f"单片历史影院 · 范围 {plan['targets']:,} 个影院日 · 可补 {plan['plannable']:,} 个 · "
                            f"待复核 204 {plan['deferred']:,} 个 · {plan['missing_scope_days']:,} 天缺少可用影院范围 · "
                            f"{plan['cooldown_days']:,} 天暂缓重查")
+                if selection[3] == "roster":
+                    self._emit(f"名单 · {plan['uncertain_roster_days']:,} 天缺少足量榜单证据 · 全国名单覆盖待核验")
             if mode == "repair":
                 result = movie_history.repair(
                     DB_PATH, RAW_DIR, *selection, max_requests=budget,
@@ -596,6 +626,8 @@ class App(tk.Tk):
                 self._emit(f"明细 {result['detail_rows']:,} 行 · {result['details']}")
                 self._emit(f"逐日审计 · {result['audit']}")
                 self._emit(f"缺口清单 · {result['gaps']}")
+                if result["roster"]:
+                    self._emit(f"每日影院名单与来源 · {result['roster']}")
             self.q.put(("history_done",))
         except Exception as exc:
             self.q.put(("error", f"单片历史影院明细失败 · {exc}", ""))

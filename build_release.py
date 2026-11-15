@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.1"
+VER = "1.2"
 DATE = dt.date.today().strftime("%Y%m%d")
 APP_NAME = "电影票房采集器"
 EXE = os.path.join(DIST, APP_NAME + ".exe")

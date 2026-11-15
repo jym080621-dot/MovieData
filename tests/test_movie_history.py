@@ -10,7 +10,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from zgdypf import datasets, db, movie_history as history
+from zgdypf import datasets, db, history_roster, movie_history as history
 from zgdypf.cinema_detail import collect, reusable_slices
 from zgdypf.client import BadPayload, Client
 
@@ -194,6 +194,86 @@ class MovieHistoryTests(unittest.TestCase):
 
     def test_cancel_before_any_request(self):
         self.assertEqual(self.repair([], stopped=lambda: True)["requests"], 0)
+
+    def roster_refresh(self, responses, **options):
+        self.routes = list(responses)
+        return history.refresh_roster(
+            self.path, self.root / "raw", DAY, DAY, emit=lambda message: None,
+            client_factory=self.client, **options,
+        )
+
+    def test_thin_roster_merges_sources_and_queues_new_cinemas(self):
+        with self.conn:
+            db.upsert_cinema_day(self.conn, dict(cinema_code=CODES[0], date=DAY, sales_src="ranklist",
+                                                 rank_sales_fen=130000))
+            db.put_date_status(self.conn, DAY, 1, "thin")
+            db.put_doc(self.conn, history.PROBE, DAY, DAY, {"status": "thin"})
+        self.routes = [(200, box())]
+        collect(self.conn, self.client(), CODES[0], DAY)
+        source = self.root / "cinemas.csv"
+        source.write_text(f"date,cinema_code,cinema_name\n{DAY},{CODES[2]},测试影院\n", encoding="utf-8")
+        self.assertEqual(history_roster.import_csv(self.path, source)["records"], 1)
+        update = self.roster_refresh([(200, {"salesRankList": [{"code": CODES[1]}], "hasMore": False})])
+        self.assertEqual((update["requests"], update["new_candidates"]), (1, 1))
+        self.assertEqual(self.roster_refresh([])["requests"], 0)
+        _, _, _, usable, states, sources = history._day_plan(self.conn, MOVIE, DAY, "roster", ())
+        self.assertFalse(usable)
+        self.assertEqual(states, {CODES[0]: "with_movie", CODES[1]: "missing", CODES[2]: "missing"})
+        self.assertEqual(sources[CODES[0]], ["local_detail", "local_rank"])
+        self.assertEqual(sources[CODES[1]], ["site_rank"])
+        self.assertEqual(sources[CODES[2]], ["csv:cinemas.csv"])
+        plan = history.plan_totals(self.path, MOVIE, DAY, DAY, "roster")
+        self.assertEqual((plan["targets"], plan["plannable"], plan["uncertain_roster_days"]), (3, 2, 1))
+        result = self.repair([(200, box()), (200, box())], scope="roster", max_requests=2)
+        self.assertEqual((result["requests"], result["ok"]), (2, 2))
+        self.assertTrue(all("/getCinemaBoxData?" in url for url in self.calls[-2:]))
+        report = history.export_reports(self.path, self.root, MOVIE, DAY, DAY, "roster")
+        with report["audit"].open(encoding="utf-8-sig", newline="") as f:
+            row = next(csv.DictReader(f))
+        self.assertEqual((row["coverage_status"], row["roster_rank_snapshot_status"],
+                          row["national_roster_coverage"]), ("scope_observed", "thin", "unverified"))
+        with report["roster"].open(encoding="utf-8-sig", newline="") as f:
+            self.assertEqual(len(list(csv.DictReader(f))), 3)
+
+    def test_roster_refresh_resumes_pagination_and_retains_old_rows(self):
+        first = {"salesRankList": [{"code": CODES[0]}, {"code": CODES[1]}], "hasMore": True}
+        last = {"salesRankList": [{"code": CODES[2]}], "hasMore": False}
+        result = self.roster_refresh([(200, first)], max_requests=1)
+        self.assertEqual(result["requests"], 1)
+        state = history_roster.stored_refreshes(self.conn)[DAY]
+        self.assertEqual((state["status"], state["next_offset"]), ("fetching", 2))
+        result = self.roster_refresh([(200, last)], max_requests=1)
+        self.assertEqual(result["updated_days"], 1)
+        self.assertIn("offset=2", self.calls[-1])
+        state = history_roster.stored_refreshes(self.conn)[DAY]
+        self.assertEqual((state["status"], state["row_count"]), ("thin", 3))
+        self.roster_refresh([(200, last)], refresh_again=True)
+        self.assertEqual(set(history_roster.candidates(self.conn, DAY, [], [])), set(CODES[:3]))
+
+    def test_roster_refresh_flags_repeated_page(self):
+        page = {"salesRankList": [{"code": CODES[0]}], "hasMore": True}
+        result = self.roster_refresh([(200, page), (200, page)])
+        self.assertEqual(result["requests"], 2)
+        state = history_roster.stored_refreshes(self.conn)[DAY]
+        self.assertEqual((state["status"], state["row_count"]), ("partial", 1))
+
+    def test_roster_repair_prioritizes_current_snapshot_without_dropping_old_cinemas(self):
+        with self.conn:
+            db.upsert_cinema_day(self.conn, dict(cinema_code=CODES[2], date=DAY, sales_src="ranklist"))
+        self.roster_refresh([(200, {"salesRankList": [{"code": CODES[0]}], "hasMore": False})])
+        first = self.repair([(200, box())], scope="roster", max_requests=1)
+        self.assertEqual((first["requests"], first["ok"]), (1, 1))
+        self.assertIn(CODES[0], self.calls[-1])
+        second = self.repair([(200, box())], scope="roster", max_requests=1)
+        self.assertEqual((second["requests"], second["ok"]), (1, 1))
+        self.assertIn(CODES[2], self.calls[-1])
+
+    def test_invalid_roster_csv_has_no_partial_writes(self):
+        source = self.root / "bad.csv"
+        source.write_text(f"date,cinema_code\n{DAY},{CODES[0]}\n{DAY},ABC\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            history_roster.import_csv(self.path, source)
+        self.assertEqual(history_roster.candidates(self.conn, DAY, [], []), {})
 
 
 if __name__ == "__main__":

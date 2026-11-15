@@ -26,7 +26,7 @@ from typing import List, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import api, db, movie_history
+from zgdypf import api, db, history_roster, movie_history
 from zgdypf import app_root as _app_root
 from zgdypf import sample as samp
 from zgdypf.cinema_detail import collect, defer_empty, reusable_slices
@@ -503,9 +503,22 @@ def cmd_export(args) -> int:
 
 
 def cmd_movie_history(args) -> int:
-    codes = movie_history.parse_codes(args.cinemas)
-    selection = (args.code, args.start, args.end, args.scope, codes)
     try:
+        if args.mode == "roster-import":
+            result = history_roster.import_csv(args.db, args.csv)
+            print(f"名单已合并 · {result['days']:,} 天 · 输入 {result['records']:,} 个不重复影院日")
+            return 0
+        if args.mode == "roster-refresh":
+            result = movie_history.refresh_roster(
+                args.db, args.raw, args.start, args.end, max_requests=args.max_requests,
+                rate=args.history_rate, minutes=args.minutes, refresh_again=args.refresh_again,
+                emit=lambda message: print(message, flush=True),
+            )
+            print(f"名单请求 {result['requests']} 次，更新 {result.get('updated_days', 0)} 天，"
+                  f"复用 {result.get('skipped_days', 0)} 天。")
+            return int(bool(result.get("failed")))
+        codes = movie_history.parse_codes(args.cinemas)
+        selection = (args.code, args.start, args.end, args.scope, codes)
         if args.mode == "repair":
             options = {"retry_empty": args.retry_empty, "recheck_days": args.recheck_days}
             plan = movie_history.plan_totals(args.db, *selection, **options)
@@ -513,6 +526,8 @@ def cmd_movie_history(args) -> int:
                   f"涉及 {plan['probe_days']:,} 个探测日。"
                   f"另有 {plan['missing_scope_days']:,} 天缺少可用影院范围，"
                   f"{plan['cooldown_days']:,} 天暂缓重查。", flush=True)
+            if args.scope == "roster":
+                print(f"{plan['uncertain_roster_days']:,} 天缺少足量榜单证据，全国名单覆盖待核验。", flush=True)
             print(f"每批最多 {args.max_requests} 次请求（含探针与重试），"
                   f"本批{'执行' if args.apply else '只预览'}。", flush=True)
             if not args.apply:
@@ -532,8 +547,10 @@ def cmd_movie_history(args) -> int:
             print(f"明细 {result['detail_rows']:,} 行 · {result['details']}")
         print(f"逐日审计 {result['days']:,} 天 · {result['audit']}")
         print(f"缺口清单 · {result['gaps']}")
+        if result["roster"]:
+            print(f"每日影院名单与来源 · {result['roster']}")
         return 0
-    except (ValueError, OSError, sqlite3.Error) as exc:
+    except (ValueError, OSError, sqlite3.Error, csv.Error) as exc:
         print(f"单片历史影院明细失败 · {exc}", file=sys.stderr)
         return 1
 
@@ -583,12 +600,26 @@ def main() -> int:
 
     history = sub.add_parser("movie-history", help="单片影院明细导出、审计与补采")
     actions = history.add_subparsers(dest="mode", required=True)
+    p = actions.add_parser("roster-import", help="合并每日影院名单 CSV")
+    p.add_argument("--db", default=DB_PATH)
+    p.add_argument("--csv", required=True)
+    p.set_defaults(func=cmd_movie_history)
+    p = actions.add_parser("roster-refresh", help="联网更新每日影院名单")
+    p.add_argument("--db", default=DB_PATH)
+    p.add_argument("--raw", default=RAW_DIR)
+    p.add_argument("--start", required=True)
+    p.add_argument("--end", required=True)
+    p.add_argument("--max-requests", type=int, default=20)
+    p.add_argument("--rate", dest="history_rate", type=float, default=1.0)
+    p.add_argument("--minutes", type=float, default=10)
+    p.add_argument("--refresh-again", action="store_true", help="重新获取已更新过的日期")
+    p.set_defaults(func=cmd_movie_history)
     for mode in ("export", "audit", "repair"):
         p = actions.add_parser(mode)
         p.add_argument("--code", required=True, help="数字影片编码，保留前导零")
         p.add_argument("--start", required=True)
         p.add_argument("--end", required=True)
-        p.add_argument("--scope", choices=movie_history.SCOPES, default="sample")
+        p.add_argument("--scope", choices=movie_history.SCOPES, default="roster")
         p.add_argument("--cinemas", default="", help="指定影院编码，以逗号分隔")
         p.add_argument("--db", default=DB_PATH)
         p.set_defaults(func=cmd_movie_history)

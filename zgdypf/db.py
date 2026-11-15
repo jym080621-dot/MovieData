@@ -155,6 +155,25 @@ CREATE TABLE IF NOT EXISTS collect_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_status ON collect_ledger(job, status);
 
+CREATE TABLE IF NOT EXISTS history_cinema_roster (
+    date TEXT NOT NULL,
+    cinema_code TEXT NOT NULL,
+    source TEXT NOT NULL,
+    run_id TEXT,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY(date, cinema_code, source)
+);
+
+CREATE TABLE IF NOT EXISTS history_roster_refresh (
+    date TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    next_offset INTEGER NOT NULL,
+    pages INTEGER NOT NULL,
+    row_count INTEGER NOT NULL,
+    checked_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS date_status (
     date         TEXT PRIMARY KEY,
     n_cinemas    INTEGER,
