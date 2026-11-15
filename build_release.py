@@ -28,7 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.3.2"
+VER = "1.3.3"
 DATE = dt.date.today().strftime("%Y%m%d")
 APP_NAME = "MovieData"
 EXE = os.path.join(DIST, APP_NAME + ".exe")

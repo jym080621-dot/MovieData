@@ -284,17 +284,44 @@ class MovieHistoryTests(unittest.TestCase):
         opts = dict(max_requests=2, emit=lambda _: None, client_factory=self.client)
         args = (self.path, self.root / "raw", self.root, MOVIE, DAY, DAY)
         phases = []
-        first = history.run_quick_batch(*args, progress=phases.append, **opts)
+        counts = []
+        first = history.run_quick_batch(*args, progress=phases.append,
+                                        on_counts=lambda *value: counts.append(value), **opts)
         self.assertEqual((first["requests"], first["saved"], first["plan"]["plannable"]), (2, 1, 1))
         self.assertEqual(first["reports"]["detail_rows"], 1)
         self.assertTrue(first["reports"]["roster"].is_file())
         self.assertEqual(len(phases), 3)
+        self.assertEqual(counts[-1], (None, 2, 1, 0))
+        self.assertEqual(first["plan"], history.plan_totals(self.path, MOVIE, DAY, DAY, "roster"))
         self.routes = [(200, box())]
         second = history.run_quick_batch(*args, **opts)
         self.assertEqual((second["requests"], second["saved"], second["plan"]["observed"]), (1, 1, 2))
         self.assertEqual(second["plan"]["uncertain_roster_days"], 1)
         self.assertEqual(second["reports"]["detail_rows"], 2)
         self.assertIn("/getCinemaBoxData?", self.calls[-1])
+
+    def test_quick_batch_time_limit_saves_progress_and_does_not_reissue_saved_calls(self):
+        self.routes = [(200, {"salesRankList": [{"code": code} for code in CODES[:2]], "hasMore": False}),
+                       (200, box()), (200, box())]
+        clock = [100.0]
+        original_open = self.fake_open
+
+        def timed_open(req, timeout):
+            response = original_open(req, timeout)
+            clock[0] += 30
+            return response
+
+        args = (self.path, self.root / "raw", self.root, MOVIE, DAY, DAY)
+        with patch("zgdypf.movie_history.time.monotonic", side_effect=lambda: clock[0]):
+            with patch.object(self, "fake_open", side_effect=timed_open):
+                limited = history.run_quick_batch(*args, minutes=1, max_requests=3000,
+                                                  emit=lambda _: None, client_factory=self.client)
+            self.assertEqual((limited["reason"], limited["requests"], limited["saved"]), ("到达时间预算", 2, 1))
+            longer = history.run_quick_batch(*args, minutes=60, max_requests=3000,
+                                             emit=lambda _: None, client_factory=self.client)
+        self.assertEqual((longer["requests"], longer["saved"], longer["reports"]["detail_rows"]), (1, 1, 2))
+        self.assertEqual(len(self.calls), 3)
+        self.assertNotEqual(self.calls[1], self.calls[2])
 
     def test_quick_batch_stops_followup_requests_when_roster_access_denied(self):
         with self.conn:

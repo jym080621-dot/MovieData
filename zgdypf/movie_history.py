@@ -143,7 +143,7 @@ GAP_FIELDS = ("date", "scope", "cinema_code", "status", "local_rank_usable", "ro
 ROSTER_FIELDS = ("date", "cinema_code", "sources", "slice_status")
 
 
-def _audit_days(conn, movie, start, end, scope, codes, gaps_writer, roster_writer):
+def _audit_days(conn, movie, start, end, scope, codes, gaps_writer, roster_writer, plan=None):
     refreshes = history_roster.stored_refreshes(conn) if scope == "roster" else {}
     for day in daterange(start, end):
         known, probe, rank, usable_rank, states, sources = _day_plan(conn, movie, day, scope, codes)
@@ -166,6 +166,8 @@ def _audit_days(conn, movie, start, end, scope, codes, gaps_writer, roster_write
                 (day, code, "|".join(origin), states[code]) for code, origin in sources.items()
             )
         refresh = refreshes.get(day)
+        if plan is not None:
+            _count_day_plan(plan, scope, usable_rank, probe, refresh, counts)
         origin_counts = Counter()
         for origin in sources.values():
             origin_counts.update({s.split(":", 1)[0] for s in origin})
@@ -221,7 +223,7 @@ def _detail_rows(conn, movie, start, end):
         yield (*tuple(row)[:9], yuan, *tuple(row)[9:])
 
 
-def export_reports(db_path, out_root, movie, start, end, scope, codes=(), *, details=True):
+def export_reports(db_path, out_root, movie, start, end, scope, codes=(), *, details=True, plan=None):
     validate(movie, start, end, scope, codes)
     prefix = Path(out_root) / f"{movie}_{start}_{end}"
     audit = prefix.with_name(prefix.name + f"_{scope}_audit.csv")
@@ -242,7 +244,7 @@ def export_reports(db_path, out_root, movie, start, end, scope, codes=(), *, det
                 roster_writer = csv.writer(roster_handle) if roster_handle else None
                 if roster_writer:
                     roster_writer.writerow(ROSTER_FIELDS)
-                rows = _audit_days(conn, movie, start, end, scope, codes, writer, roster_writer)
+                rows = _audit_days(conn, movie, start, end, scope, codes, writer, roster_writer, plan)
                 ndays = write_csv(str(tmp_audit), AUDIT_FIELDS, rows)
     return {"details": detail if details else None, "audit": audit, "gaps": gaps,
             "detail_rows": n, "days": ndays, "roster": roster}
@@ -259,6 +261,30 @@ def _pending(states, retry_empty):
     return [code for state in order for code in queues[state]]
 
 
+def _count_day_plan(totals, scope, usable, probe, refresh, counts, retry_empty=False, recheck_days=False):
+    count = sum(counts.values())
+    deferred = counts["empty_204"] + counts["deferred_204"]
+    pending = counts["missing"] + counts["inconsistent"] + counts["error"]
+    if retry_empty:
+        pending += deferred
+    totals.update(targets=count, gaps=pending, observed=counts["with_movie"] + counts["without_movie"],
+                  with_movie=counts["with_movie"], deferred=deferred)
+    if scope == "roster":
+        if not refresh or refresh["status"] == "fetching":
+            totals["pending_roster_days"] += 1
+        if (refresh and refresh["status"] != "listed") or (not refresh and not usable):
+            totals["uncertain_roster_days"] += 1
+    if not count or scope == "ranklist" and not usable:
+        totals["missing_scope_days"] += 1
+    elif pending:
+        if scope in ("explicit", "roster"):
+            totals["plannable"] += pending
+        elif not recheck_days and _recent_unavailable(probe):
+            totals["cooldown_days"] += 1
+        else:
+            totals.update(plannable=pending, probe_days=1)
+
+
 def plan_totals(db_path, movie, start, end, scope, codes=(), *, retry_empty=False, recheck_days=False):
     validate(movie, start, end, scope, codes)
     totals = Counter()
@@ -266,26 +292,8 @@ def plan_totals(db_path, movie, start, end, scope, codes=(), *, retry_empty=Fals
         refreshes = history_roster.stored_refreshes(conn) if scope == "roster" else {}
         for day in daterange(start, end):
             _, probe, _, usable, states, _ = _day_plan(conn, movie, day, scope, codes)
-            pending = _pending(states, retry_empty)
-            totals.update(targets=len(states), gaps=len(pending),
-                          observed=sum(s in ("with_movie", "without_movie") for s in states.values()),
-                          with_movie=sum(s == "with_movie" for s in states.values()),
-                          deferred=sum(s in ("empty_204", "deferred_204") for s in states.values()))
-            if scope == "roster":
-                refresh = refreshes.get(day)
-                if not refresh or refresh["status"] == "fetching":
-                    totals["pending_roster_days"] += 1
-                if (refresh and refresh["status"] != "listed") or (not refresh and not usable):
-                    totals["uncertain_roster_days"] += 1
-            if not states or scope == "ranklist" and not usable:
-                totals.update(missing_scope_days=1)
-            elif pending:
-                if scope in ("explicit", "roster"):
-                    totals.update(plannable=len(pending))
-                elif not recheck_days and _recent_unavailable(probe):
-                    totals.update(cooldown_days=1)
-                else:
-                    totals.update(plannable=len(pending), probe_days=1)
+            _count_day_plan(totals, scope, usable, probe, refreshes.get(day), Counter(states.values()),
+                            retry_empty, recheck_days)
     return totals
 
 
@@ -379,7 +387,8 @@ def repair(db_path, raw_dir, movie, start, end, scope, codes=(), *, max_requests
     return _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty, recheck_days, emit)
 
 
-def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty, recheck_days, emit):
+def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty, recheck_days, emit,
+            on_progress=None):
     totals = Counter()
     with closing(db.connect(str(db_path))) as conn:
         try:
@@ -411,6 +420,8 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
                 consecutive_empty = 0
                 consecutive_bad = 0
                 for code in codes_to_fetch:
+                    if on_progress:
+                        on_progress(day, totals)
                     guard()
                     try:
                         result, count = collect(conn, client, code, day)
@@ -494,22 +505,40 @@ def _film_hits(rows):
 
 
 def run_quick_batch(db_path, raw_dir, out_dir, movie, start, end, *, max_requests=20, minutes=10,
-                    stopped=lambda: False, progress=lambda message: None, emit=print, client_factory=Client):
+                    stopped=lambda: False, progress=lambda message: None, on_counts=None, emit=print,
+                    client_factory=Client):
     """用同一个限速器和预算更新名单、补采，随后导出当前结果。"""
     validate(movie, start, end, "roster")
     if dt.date.fromisoformat(end) >= dt.date.today():
         raise ValueError("结束日期须早于今天")
     client, guard = _batch_client(raw_dir, 1, max_requests, minutes, stopped, client_factory)
     db_path = Path(db_path).resolve()
+
+    last_update = 0.0
+
+    def report(day=None, totals=None, *, force=False):
+        nonlocal last_update
+        now = time.monotonic()
+        if on_counts and (force or now - last_update >= 1):
+            totals = totals or {}
+            on_counts(day, client.stats.requests, totals.get("ok", 0), totals.get("empty", 0))
+            last_update = now
+
+    def log_roster(message):
+        emit(message)
+        report()
+
     progress("正在更新每日影院名单…")
-    roster = _refresh_roster(db_path, start, end, client, guard, False, emit)
+    roster = _refresh_roster(db_path, start, end, client, guard, False, log_roster)
     details = {}
     if not roster.get("stopped") and client.stats.requests < max_requests:
         progress("正在补采影院票房…")
-        details = _repair(db_path, movie, start, end, "roster", (), client, guard, False, False, emit)
+        details = _repair(db_path, movie, start, end, "roster", (), client, guard, False, False, emit,
+                          on_progress=report if on_counts else None)
+    report(totals=details, force=True)
     progress("正在导出票房和覆盖报告…")
-    reports = export_reports(db_path, out_dir, movie, start, end, "roster")
-    plan = plan_totals(db_path, movie, start, end, "roster")
+    plan = Counter()
+    reports = export_reports(db_path, out_dir, movie, start, end, "roster", plan=plan)
     return {
         "reports": reports, "plan": plan, "requests": client.stats.requests,
         "saved": details.get("ok", 0), "empty": details.get("empty", 0),

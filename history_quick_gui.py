@@ -11,6 +11,9 @@ from tkinter import messagebox, ttk
 
 from zgdypf import movie_history
 
+DEFAULT_BATCH = ("20", "10")
+LONG_BATCH = ("3000", "60")
+
 
 class QuickHistoryDialog(tk.Toplevel):
     def __init__(self, app, db_path, raw_dir, out_dir, defaults):
@@ -28,6 +31,7 @@ class QuickHistoryDialog(tk.Toplevel):
         self.start = tk.StringVar(self, defaults[1])
         self.end = tk.StringVar(self, defaults[2])
         self.cap = tk.StringVar(self, defaults[3])
+        self.minutes = tk.StringVar(self, defaults[4] if len(defaults) > 4 else DEFAULT_BATCH[1])
         self.status = tk.StringVar(self, "填写影片和日期，可先查看当前覆盖。")
         self.summary = tk.StringVar(self, "")
         self.result_choice = tk.StringVar(self)
@@ -60,28 +64,40 @@ class QuickHistoryDialog(tk.Toplevel):
         ttk.Label(batch, text="每批请求上限").pack(side="left", padx=(0, 8))
         self.limit = ttk.Entry(batch, textvariable=self.cap, width=6)
         self.limit.pack(side="left", padx=(0, 10))
-        ttk.Label(batch, text="每秒最多 1 次，总上限含名单、明细和重试。").pack(side="left")
+        ttk.Label(batch, text="最多运行（分钟）").pack(side="left", padx=(0, 8))
+        self.duration = ttk.Entry(batch, textvariable=self.minutes, width=6)
+        self.duration.pack(side="left", padx=(0, 10))
+        self.long_batch = ttk.Button(batch, text="长批次", command=self.set_long_batch)
+        self.long_batch.pack(side="left")
+        ttk.Label(body, text="每秒最多 1 次，名单、明细和重试共用请求额度。").grid(
+            row=6, column=0, columnspan=4, sticky="w", pady=(0, 4))
         actions = ttk.Frame(body)
-        actions.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(12, 8))
+        actions.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(12, 8))
         self.run = ttk.Button(actions, text="开始 / 继续一批", style="Accent.TButton", command=lambda: self.launch("run"))
         self.run.pack(side="left", padx=(0, 8))
         self.preview = ttk.Button(actions, text="查看当前覆盖", command=lambda: self.launch("preview"))
         self.preview.pack(side="left", padx=(0, 8))
         self.stop = ttk.Button(actions, text="停止", command=self.stop_run, state="disabled")
         self.stop.pack(side="left")
-        ttk.Separator(body).grid(row=7, column=0, columnspan=4, sticky="ew", pady=(7, 10))
+        ttk.Separator(body).grid(row=8, column=0, columnspan=4, sticky="ew", pady=(7, 10))
         ttk.Label(body, textvariable=self.status, wraplength=570, justify="left").grid(
-            row=8, column=0, columnspan=4, sticky="w", pady=(0, 5))
+            row=9, column=0, columnspan=4, sticky="w", pady=(0, 5))
         ttk.Label(body, textvariable=self.summary, wraplength=570, justify="left").grid(
-            row=9, column=0, columnspan=4, sticky="w")
+            row=10, column=0, columnspan=4, sticky="w")
         links = ttk.Frame(body)
-        links.grid(row=10, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        links.grid(row=11, column=0, columnspan=4, sticky="ew", pady=(10, 0))
         self.open_results = ttk.Button(links, text="打开结果目录", command=self.show_results,
                                        state="normal" if self.out_dir.is_dir() else "disabled")
         self.open_results.pack(side="right")
         self.advanced = ttk.Button(links, text="高级历史影院…", command=self.open_advanced)
         self.advanced.pack(side="left")
+        self.run_controls = (self.film_entry, *self.date_entries, self.limit, self.duration,
+                             self.long_batch, self.search, self.run, self.preview, self.advanced)
         self.film_entry.focus_set()
+
+    def set_long_batch(self):
+        self.cap.set(LONG_BATCH[0])
+        self.minutes.set(LONG_BATCH[1])
 
     def choose_film(self, _event=None):
         index = self.choices.current()
@@ -112,7 +128,7 @@ class QuickHistoryDialog(tk.Toplevel):
             movie = self._movie_code()
             start, end = self.start.get().strip(), self.end.get().strip()
             movie_history.validate(movie, start, end, "roster")
-            budget = 20
+            budget, minutes = map(int, DEFAULT_BATCH)
             if mode == "run":
                 if dt.date.fromisoformat(end) >= dt.date.today():
                     raise ValueError("结束日期须早于今天。")
@@ -122,11 +138,17 @@ class QuickHistoryDialog(tk.Toplevel):
                         raise ValueError
                 except ValueError:
                     raise ValueError("每批请求上限须为正整数。") from None
+                try:
+                    minutes = int(self.minutes.get())
+                    if minutes < 1:
+                        raise ValueError
+                except ValueError:
+                    raise ValueError("运行时间须为正整数分钟。") from None
         except ValueError as exc:
             self.status.set(str(exc))
             return
-        self.app.quick_defaults = (movie, start, end, self.cap.get())
-        self.begin(mode, (movie, start, end, budget))
+        self.app.quick_defaults = (movie, start, end, self.cap.get(), self.minutes.get())
+        self.begin(mode, (movie, start, end, budget, minutes))
 
     def begin(self, mode, args):
         if self.app._running:
@@ -137,8 +159,7 @@ class QuickHistoryDialog(tk.Toplevel):
         self.summary.set("")
         self.status.set({"search": "正在查找影片…", "remote_search": "正在联网查找影片…",
                          "preview": "正在读取当前覆盖…", "run": "正在准备本批…"}[mode])
-        for widget in (self.film_entry, *self.date_entries, self.limit, self.search, self.choices,
-                       self.run, self.preview, self.advanced):
+        for widget in (*self.run_controls, self.choices):
             widget.configure(state="disabled")
         self.stop.configure(state="normal" if mode == "run" else "disabled")
         threading.Thread(target=self._work, args=(mode, args, self.app._stop), daemon=True).start()
@@ -151,17 +172,20 @@ class QuickHistoryDialog(tk.Toplevel):
             elif mode == "remote_search":
                 result = (args[0], movie_history.search_films(self.raw_dir, args[0], stopped=stop.is_set))
             elif mode == "preview":
-                movie, start, end, _ = args
+                movie, start, end, _, _ = args
                 if Path(self.db_path).is_file():
                     result = movie_history.plan_totals(self.db_path, movie, start, end, "roster")
                 else:
                     days = (dt.date.fromisoformat(end) - dt.date.fromisoformat(start)).days + 1
                     result = {"pending_roster_days": days, "uncertain_roster_days": days}
             else:
-                movie, start, end, budget = args
+                movie, start, end, budget, minutes = args
                 result = movie_history.run_quick_batch(
                     self.db_path, self.raw_dir, self.out_dir, movie, start, end, max_requests=budget,
+                    minutes=minutes,
                     stopped=stop.is_set, progress=lambda msg: self.app.q.put(("quick_status", self, msg)),
+                    on_counts=lambda day, requests, saved, empty: self.app.q.put(
+                        ("quick_counts", self, day, requests, budget, saved, empty)),
                     emit=self.app._emit,
                 )
             self.app.q.put(("quick_result", self, mode, result, None))
@@ -171,8 +195,7 @@ class QuickHistoryDialog(tk.Toplevel):
     def finish(self, mode, result, error):
         self.busy = False
         self.app._reset()
-        for widget in (self.film_entry, *self.date_entries, self.limit, self.search,
-                       self.run, self.preview, self.advanced):
+        for widget in self.run_controls:
             widget.configure(state="normal")
         self.choices.configure(state="readonly")
         self.stop.configure(state="disabled")
@@ -213,7 +236,8 @@ class QuickHistoryDialog(tk.Toplevel):
                 state = "当前没有可自动补采的影院日，已导出"
             else:
                 state = "本批导出完成"
-            self.status.set(f"{state} · 请求 {result['requests']:,} 次 · 明细 {result['reports']['detail_rows']:,} 行")
+            self.status.set(f"{state} · 请求 {result['requests']:,} 次 · 本批核查 {result['saved']:,} 个影院日\n"
+                            f"累计导出该片明细 {result['reports']['detail_rows']:,} 行")
             self.open_results.configure(state="normal")
             plan = result["plan"]
         else:
@@ -225,6 +249,11 @@ class QuickHistoryDialog(tk.Toplevel):
             f"待更新名单 {plan.get('pending_roster_days', 0):,} 天 · "
             f"榜单证据不足 {plan.get('uncertain_roster_days', 0):,} 天\n全国名单覆盖待核验"
         )
+
+    def show_counts(self, day, requests, budget, saved, empty):
+        prefix = f"{day} · " if day else ""
+        self.summary.set(f"{prefix}本批请求 {requests:,} / {budget:,}\n"
+                         f"本批已核查 {saved:,} 个影院日 · 204 待复核 {empty:,}")
 
     def stop_run(self):
         self.app._stop.set()
@@ -248,5 +277,5 @@ class QuickHistoryDialog(tk.Toplevel):
             self.stop_run()
         else:
             film = self.selected[0] if self.selected and self.movie.get() == self.selected[1] else self.movie.get()
-            self.app.quick_defaults = (film, self.start.get(), self.end.get(), self.cap.get())
+            self.app.quick_defaults = (film, self.start.get(), self.end.get(), self.cap.get(), self.minutes.get())
             self.destroy()

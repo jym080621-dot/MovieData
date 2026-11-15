@@ -718,6 +718,8 @@ class App(tk.Tk):
                     self._reset()
                 elif k == "quick_status":
                     m[1].status.set(m[2])
+                elif k == "quick_counts":
+                    m[1].show_counts(*m[2:])
                 elif k == "quick_result":
                     m[1].finish(m[2], m[3], m[4])
                 elif k == "exported":
