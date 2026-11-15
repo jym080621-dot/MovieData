@@ -25,6 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from zgdypf import app_root, datasets, db, history_roster, movie_history
 from zgdypf.client import Client
+from history_quick_gui import QuickHistoryDialog
 
 ROOT = app_root()
 DB_PATH = os.path.join(ROOT, "boxoffice.db")
@@ -57,6 +58,7 @@ class App(tk.Tk):
         self._running = False
         self._t0 = 0.0
         self._total = 0
+        self.quick_defaults = None
 
         self._init_style()
         self._build()
@@ -101,6 +103,9 @@ class App(tk.Tk):
         ttk.Label(head, text="   数据源 zgdypf.zgdypw.cn（专资办口径）· 纯标准库 · 断点续跑",
                   style="Sub.TLabel").pack(side="left", padx=(4, 0))
         ttk.Label(head, text=f"库：{os.path.basename(DB_PATH)}", style="Sub.TLabel").pack(side="right")
+        self.btn_quick = ttk.Button(head, text="单片全国历史", style="Accent.TButton",
+                                    command=self._quick_history_dialog)
+        self.btn_quick.pack(side="right", padx=12)
 
         body = ttk.Frame(self, padding=(18, 4, 18, 6))
         body.pack(fill="both", expand=True)
@@ -493,7 +498,14 @@ class App(tk.Tk):
                   f"{opts['rate']} req/s", "head")
         threading.Thread(target=self._worker, args=(sel, opts), daemon=True).start()
 
-    def _history_dialog(self):
+    def _quick_history_dialog(self):
+        if not self._running:
+            defaults = self.quick_defaults or ("", self.v_start.get(), self.v_end.get(), "20")
+            QuickHistoryDialog(
+                self, DB_PATH, RAW_DIR, os.path.join(ROOT, "output", "movie_history"), defaults,
+            )
+
+    def _history_dialog(self, defaults=None):
         if self._running:
             return
         pane = tk.Toplevel(self)
@@ -504,13 +516,14 @@ class App(tk.Tk):
         form.pack(fill="both", expand=True)
         scope_map = {"当前样本": "sample", "本地日影院榜": "ranklist", "指定影院": "explicit",
                      "逐日影院名单": "roster"}
+        movie, start, end, budget = defaults or ("", self.v_start.get(), self.v_end.get(), "20")
         prompts = (
-            ("影片编码", "", "保留前导零"),
-            ("开始日期", self.v_start.get(), "YYYY-MM-DD"),
-            ("结束日期", self.v_end.get(), "YYYY-MM-DD"),
+            ("影片编码", movie, "保留前导零"),
+            ("开始日期", start, "YYYY-MM-DD"),
+            ("结束日期", end, "YYYY-MM-DD"),
             ("审计及补采范围", "逐日影院名单", ""),
             ("影院编码", "", "指定影院模式使用，以逗号分隔"),
-            ("每批请求上限", "20", "包含日期探针与重试"),
+            ("每批请求上限", budget, "包含日期探针与重试"),
         )
         values = []
         for index, (label, initial, hint) in enumerate(prompts):
@@ -689,6 +702,10 @@ class App(tk.Tk):
                     self.lbl_status.configure(text="单片历史影院处理结束")
                     self.lbl_prog.configure(text="就绪")
                     self._reset()
+                elif k == "quick_status":
+                    m[1].status.set(m[2])
+                elif k == "quick_result":
+                    m[1].finish(m[2], m[3], m[4])
                 elif k == "exported":
                     self.btn_export.configure(state="normal")
                     self._log(f"导出完成：{m[1]['movies']} 部影片 · {m[1].get('cinemas', 0)} 家影院 · "
@@ -750,6 +767,8 @@ def main() -> int:
     except Exception:
         pass
     app = App(selftest=selftest)
+    if "--quick-history" in sys.argv:
+        app.after(100, app._quick_history_dialog)
     if selftest:
         app.withdraw()
         app.v_start.set(_yesterday())

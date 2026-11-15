@@ -275,6 +275,58 @@ class MovieHistoryTests(unittest.TestCase):
             history_roster.import_csv(self.path, source)
         self.assertEqual(history_roster.candidates(self.conn, DAY, [], []), {})
 
+    def test_quick_batch_shares_budget_exports_and_resumes(self):
+        self.routes = [(200, {"salesRankList": [
+            {"code": CODES[0]}, {"code": CODES[1]},
+        ], "hasMore": False}), (200, box())]
+        opts = dict(max_requests=2, emit=lambda _: None, client_factory=self.client)
+        args = (self.path, self.root / "raw", self.root, MOVIE, DAY, DAY)
+        phases = []
+        first = history.run_quick_batch(*args, progress=phases.append, **opts)
+        self.assertEqual((first["requests"], first["saved"], first["plan"]["plannable"]), (2, 1, 1))
+        self.assertEqual(first["reports"]["detail_rows"], 1)
+        self.assertTrue(first["reports"]["roster"].is_file())
+        self.assertEqual(len(phases), 3)
+        self.routes = [(200, box())]
+        second = history.run_quick_batch(*args, **opts)
+        self.assertEqual((second["requests"], second["saved"], second["plan"]["observed"]), (1, 1, 2))
+        self.assertEqual(second["plan"]["uncertain_roster_days"], 1)
+        self.assertEqual(second["reports"]["detail_rows"], 2)
+        self.assertIn("/getCinemaBoxData?", self.calls[-1])
+
+    def test_quick_batch_stops_followup_requests_when_roster_access_denied(self):
+        with self.conn:
+            db.upsert_cinema_day(self.conn, dict(cinema_code=CODES[0], date=DAY, sales_src="ranklist"))
+        self.routes = [(429, {"Retry-After": "120"})]
+        result = history.run_quick_batch(
+            self.path, self.root / "raw", self.root, MOVIE, DAY, DAY,
+            emit=lambda _: None, client_factory=self.client,
+        )
+        self.assertEqual((result["requests"], result["saved"], result["failed"]), (1, 0, True))
+        self.assertEqual(result["plan"]["plannable"], 1)
+        self.assertTrue(result["reports"]["audit"].is_file())
+
+    def test_quick_batch_cancel_still_exports(self):
+        result = history.run_quick_batch(
+            self.path, self.root / "raw", self.root, MOVIE, DAY, DAY,
+            stopped=lambda: True, emit=lambda _: None, client_factory=self.client,
+        )
+        self.assertEqual((result["requests"], result["reason"]), (0, "用户停止"))
+        self.assertTrue(result["reports"]["audit"].is_file())
+
+    def test_quick_film_search_deduplicates_title_and_keeps_code(self):
+        with self.conn:
+            db.upsert(self.conn, "dim_movie", {"movie_code": MOVIE, "movie_name": "电影测试"})
+            db.upsert(self.conn, "fact_year_movie",
+                      {"year": 2026, "movie_code": MOVIE, "movie_name": "电影测试"})
+            db.upsert(self.conn, "fact_year_movie",
+                      {"year": 2025, "movie_code": "00000000001", "movie_name": "电影测试"})
+        self.assertEqual(set(history.find_films(self.path, "电影测试")),
+                         {(MOVIE, "电影测试"), ("00000000001", "电影测试")})
+        self.routes = [(200, [{"code": MOVIE, "name": "电影测试"}, {"code": MOVIE, "name": "电影测试"}])]
+        self.assertEqual(history.search_films(self.root, "电影测试", client_factory=self.client),
+                         [(MOVIE, "电影测试")])
+
 
 if __name__ == "__main__":
     unittest.main()

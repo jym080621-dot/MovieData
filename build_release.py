@@ -26,14 +26,14 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.2"
+VER = "1.3"
 DATE = dt.date.today().strftime("%Y%m%d")
 APP_NAME = "电影票房采集器"
 EXE = os.path.join(DIST, APP_NAME + ".exe")
 
 SRC_FILES = [
-    "gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
-    "启动采集器.bat", "启动说明.txt",
+    "gui.py", "history_quick_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
+    "启动采集器.bat", "启动单片全国历史.bat", "启动说明.txt",
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
     "tests/test_movie_history.py",
     "sample.csv",

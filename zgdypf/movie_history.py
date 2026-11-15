@@ -268,9 +268,13 @@ def plan_totals(db_path, movie, start, end, scope, codes=(), *, retry_empty=Fals
             _, probe, _, usable, states, _ = _day_plan(conn, movie, day, scope, codes)
             pending = _pending(states, retry_empty)
             totals.update(targets=len(states), gaps=len(pending),
+                          observed=sum(s in ("with_movie", "without_movie") for s in states.values()),
+                          with_movie=sum(s == "with_movie" for s in states.values()),
                           deferred=sum(s in ("empty_204", "deferred_204") for s in states.values()))
             if scope == "roster":
                 refresh = refreshes.get(day)
+                if not refresh or refresh["status"] == "fetching":
+                    totals["pending_roster_days"] += 1
                 if (refresh and refresh["status"] != "listed") or (not refresh and not usable):
                     totals["uncertain_roster_days"] += 1
             if not states or scope == "ranklist" and not usable:
@@ -315,6 +319,10 @@ def refresh_roster(db_path, raw_dir, start, end, *, max_requests=20, rate=1.0, m
         raise ValueError("历史名单更新的结束日期须早于今天")
     db_path = Path(db_path).resolve(strict=True)
     client, guard = _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory)
+    return _refresh_roster(db_path, start, end, client, guard, refresh_again, emit)
+
+
+def _refresh_roster(db_path, start, end, client, guard, refresh_again, emit):
     totals = Counter()
     with closing(db.connect(str(db_path))) as conn:
         previous = history_roster.stored_refreshes(conn)
@@ -329,6 +337,7 @@ def refresh_roster(db_path, raw_dir, start, end, *, max_requests=20, rate=1.0, m
                 totals["updated_days"] += 1
         except (BatchEnded, HardError, RetryExhausted, BadPayload) as exc:
             emit(f"名单更新停止 · {exc}")
+            totals["stopped"] = str(exc)
             if not isinstance(exc, BatchEnded):
                 totals["failed"] = 1
     return {**totals, "requests": client.stats.requests, "retries": client.stats.retries}
@@ -366,8 +375,12 @@ def repair(db_path, raw_dir, movie, start, end, scope, codes=(), *, max_requests
     if dt.date.fromisoformat(end) >= dt.date.today():
         raise ValueError("历史补采的结束日期须早于今天")
     db_path = Path(db_path).resolve(strict=True)
-    totals = Counter()
     client, guard = _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory)
+    return _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty, recheck_days, emit)
+
+
+def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty, recheck_days, emit):
+    totals = Counter()
     with closing(db.connect(str(db_path))) as conn:
         try:
             for day in daterange(start, end):
@@ -437,3 +450,72 @@ def repair(db_path, raw_dir, movie, start, end, scope, codes=(), *, max_requests
     totals["requests"] = client.stats.requests
     totals["retries"] = client.stats.retries
     return dict(totals)
+
+
+def find_films(db_path, query):
+    """按标题搜索已有的影片记录，相同片码只显示一次。"""
+    if not Path(db_path).is_file():
+        return []
+    query = query.strip()
+    with open_readonly(db_path) as conn:
+        rows = conn.execute("""
+            WITH films AS (
+                SELECT movie_code,movie_name FROM dim_movie
+                UNION SELECT movie_code,movie_name FROM fact_year_movie
+                UNION SELECT movie_code,movie_name FROM fact_period_movie
+                UNION SELECT movie_code,movie_name FROM fact_movie_national_day
+                UNION SELECT movie_code,movie_name FROM fact_cinema_movie
+            )
+            SELECT movie_code, movie_name FROM films
+            WHERE movie_code IS NOT NULL AND movie_name IS NOT NULL
+                AND (instr(movie_name,:query)>0 OR movie_code=:query)
+            ORDER BY movie_name=:query DESC, movie_name, movie_code
+        """, {"query": query})
+        return _film_hits(rows)
+
+
+def search_films(raw_dir, query, *, stopped=lambda: False, client_factory=Client):
+    """一次受限联网搜索，结果由用户选择。"""
+    client, _ = _batch_client(raw_dir, 1, 1, 1, stopped, client_factory)
+    data = client.fetch("/searchMovie", {"movieName": query, "limit": 20, "offset": 0}).data
+    if not isinstance(data, list):
+        raise BadPayload("影片搜索返回格式异常")
+    return _film_hits((row.get("code"), row.get("name")) for row in data if isinstance(row, dict))
+
+
+def _film_hits(rows):
+    hits = {}
+    for code, name in rows:
+        if isinstance(code, str) and re.fullmatch(r"[0-9]{1,30}", code) and isinstance(name, str) and name.strip():
+            hits.setdefault(code, name.strip())
+            if len(hits) >= 20:
+                break
+    return [(code, name) for code, name in hits.items()]
+
+
+def run_quick_batch(db_path, raw_dir, out_dir, movie, start, end, *, max_requests=20, minutes=10,
+                    stopped=lambda: False, progress=lambda message: None, emit=print, client_factory=Client):
+    """用同一个限速器和预算更新名单、补采，随后导出当前结果。"""
+    validate(movie, start, end, "roster")
+    if dt.date.fromisoformat(end) >= dt.date.today():
+        raise ValueError("结束日期须早于今天")
+    client, guard = _batch_client(raw_dir, 1, max_requests, minutes, stopped, client_factory)
+    db_path = Path(db_path).resolve()
+    progress("正在更新每日影院名单…")
+    roster = _refresh_roster(db_path, start, end, client, guard, False, emit)
+    details = {}
+    if not roster.get("stopped") and client.stats.requests < max_requests:
+        progress("正在补采影院票房…")
+        details = _repair(db_path, movie, start, end, "roster", (), client, guard, False, False, emit)
+    progress("正在导出票房和覆盖报告…")
+    reports = export_reports(db_path, out_dir, movie, start, end, "roster")
+    plan = plan_totals(db_path, movie, start, end, "roster")
+    return {
+        "reports": reports, "plan": plan, "requests": client.stats.requests,
+        "saved": details.get("ok", 0), "empty": details.get("empty", 0),
+        "new_candidates": roster.get("new_candidates", 0),
+        "failed": bool(roster.get("failed") or details.get("failed") or details.get("errors")),
+        "reason": roster.get("stopped") or details.get("stopped") or (
+            "到达请求上限" if client.stats.requests >= max_requests else None
+        ),
+    }
