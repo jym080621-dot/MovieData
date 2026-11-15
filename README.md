@@ -31,29 +31,47 @@
 ## 二、工程结构
 
 ```
-\MovieData
-├── zgdypf/
-│   ├── client.py     HTTP：全局限速、分级重试、原始响应落盘
-│   ├── parse.py      单位解析（元/万/亿、分、占比），软失败
-│   ├── ssr.py        __INITIAL_STATE__ 抽取（字符串感知的括号配对）
-│   ├── api.py        24 个端点的函数封装，参数名按实测固定
-│   ├── common.py     日期/金额行归一/完整性探针（CLI 与 UI 共用）
-│   ├── datasets.py   24 个数据集注册表 + 执行引擎（UI 的底座）
-│   ├── db.py         SQLite schema + 通用 upsert + 断点台账
-│   ├── sample.py     省份 × 规模三分位分层抽样
-│   └── qa.py         8 项质量校验 + Markdown 报告
-├── gui.py            ★ Tkinter 图形界面（24 选 N、日期区间、进度、日志）
-├── 启动采集器.bat     双击启动（pythonw，无控制台窗口）
-├── pipeline.py       命令行主程序：init / day / verify / sample / box / movie / qa
-├── contract_test.py  32 条契约断言（改站点前先跑它）
-├── boxoffice.db      结果库
-├── raw/              原始响应（按端点/日期/编码落盘，可回溯）
-├── sample.csv        锁定的样本名单
-├── CONTRACT.md       接口实测契约（核心文档）
-├── QA_REPORT.md      质量报告（pipeline qa 生成）
-├── TABLES.md         结果表（make_tables.py 生成）
-├── 使用教程.md         ★ 界面完整使用手册（每个选项、每个数字的含义）
-└── phase0_*.py, diag_*.py   探测与诊断脚本（保留证据）
+.
+├── zgdypf/                    采集与解析层（纯标准库）
+│   ├── client.py              HTTP：全局限速、分级重试、原始响应落盘
+│   ├── parse.py               单位解析（元/万/亿、分、占比），软失败
+│   ├── ssr.py                 __INITIAL_STATE__ 抽取（字符串感知的括号配对）
+│   ├── api.py                 24 个端点的函数封装，参数名按实测固定
+│   ├── common.py              日期/金额行归一/完整性探针（CLI 与 UI 共用）
+│   ├── datasets.py            24 个数据集注册表 + 执行引擎（UI 的底座）
+│   ├── db.py                  SQLite schema + 通用 upsert + 断点台账
+│   ├── sample.py              省份 × 规模三分位分层抽样
+│   ├── qa.py                  8 项质量校验 + Markdown 报告
+│   ├── export.py              导出 CSV / JSON（按影片、影院分目录）
+│   ├── cinema_detail.py       影院详情页解析
+│   ├── movie_history.py       单片历史影院：查询、补采、审计
+│   └── history_roster.py      逐日影院名单
+├── tests/                     单元测试
+├── gui.py                     ★ Tkinter 图形界面（24 选 N、日期区间、进度、日志）
+├── history_quick_gui.py       单片历史影院快捷窗口
+├── pipeline.py                命令行主程序：init / day / verify / sample / box / movie / movie-history / qa / export
+├── contract_test.py           32 条契约断言（改站点前先跑它）
+├── build_release.py           打 release 包（exe + 源码 + 数据备份）
+├── 启动采集器.bat              双击启动（探测 Python 3.10+，调 gui.py）
+├── 启动单片全国历史.bat         双击打开「单片历史影院」
+├── launch_source.bat          启动器（上面两个 .bat 都调它）
+├── sample.csv                 锁定的样本名单
+├── CONTRACT.md                接口实测契约（核心文档）
+├── TABLES.md                  结果表（make_tables.py 生成）
+├── QA_REPORT.md               质量报告（pipeline qa 生成）
+├── 使用教程.md                 ★ 界面完整使用手册（每个选项、每个数字的含义）
+├── 单片历史影院使用说明.md       单片历史影院的用法与审计字段
+├── LICENSE                    MIT
+└── ui_all.png, ui_running.png 界面截图
+```
+
+运行时自动生成（已在 `.gitignore` 中忽略，不提交）：
+
+```
+boxoffice.db   结果库
+raw/           原始响应（按端点/日期/编码落盘，可回溯）
+output/        导出结果
+dist/ build/   打包产物
 ```
 
 ---
