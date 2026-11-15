@@ -27,7 +27,7 @@
 ## 二、工程结构
 
 ```
-D:\MovieData
+\MovieData
 ├── zgdypf/
 │   ├── client.py     HTTP：全局限速、分级重试、原始响应落盘
 │   ├── parse.py      单位解析（元/万/亿、分、占比），软失败
