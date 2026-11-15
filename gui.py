@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import queue
+import sqlite3
 import sys
 import threading
 import time
@@ -102,7 +103,8 @@ class App(tk.Tk):
         ttk.Label(head, text="采集控制台", style="H1.TLabel").pack(side="left")
         ttk.Label(head, text="   数据源 zgdypf.zgdypw.cn（专资办口径）· 纯标准库 · 断点续跑",
                   style="Sub.TLabel").pack(side="left", padx=(4, 0))
-        ttk.Label(head, text=f"库：{os.path.basename(DB_PATH)}", style="Sub.TLabel").pack(side="right")
+        database = os.path.basename(DB_PATH) if os.path.isfile(DB_PATH) else "尚未载入历史库"
+        ttk.Label(head, text=f"库：{database}", style="Sub.TLabel").pack(side="right")
         self.btn_quick = ttk.Button(head, text="单片全国历史", style="Accent.TButton",
                                     command=self._quick_history_dialog)
         self.btn_quick.pack(side="right", padx=12)
@@ -505,6 +507,18 @@ class App(tk.Tk):
                 self, DB_PATH, RAW_DIR, os.path.join(ROOT, "output", "movie_history"), defaults,
             )
 
+    def _check_data_folder(self):
+        """将移动后无法打开数据库的错误显示在窗口中。"""
+        if not os.path.isfile(DB_PATH):
+            self.lbl_status.configure(text="新目录 · 将旧 boxoffice.db 复制到程序同一目录可继续采集")
+            return
+        try:
+            with movie_history.open_readonly(DB_PATH) as conn:
+                conn.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+        except (sqlite3.Error, OSError) as exc:
+            self.lbl_status.configure(text="无法读取数据库")
+            messagebox.showerror("无法读取数据库", f"{DB_PATH}\n\n{exc}", parent=self)
+
     def _history_dialog(self, defaults=None):
         if self._running:
             return
@@ -767,6 +781,8 @@ def main() -> int:
     except Exception:
         pass
     app = App(selftest=selftest)
+    if not (selftest or demo):
+        app.after(150, app._check_data_folder)
     if "--quick-history" in sys.argv:
         app.after(100, app._quick_history_dialog)
     if selftest:

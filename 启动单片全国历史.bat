@@ -1,8 +1,3 @@
 @echo off
-cd /d "%~dp0"
-where pythonw >nul 2>nul
-if %errorlevel%==0 (
-    start "" pythonw gui.py --quick-history
-) else (
-    python gui.py --quick-history
-)
+call "%~dp0launch_source.bat" --quick-history
+exit /b %errorlevel%
