@@ -301,19 +301,24 @@ class BatchEnded(Exception):
     pass
 
 
-def _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory, *, max_rate=1.0):
-    if type(max_requests) is not int or max_requests < 1 or not math.isfinite(rate) or not 0 < rate <= max_rate:
-        raise ValueError(f"请求上限须为正整数，每秒请求数须大于 0 且不超过 {max_rate:g}")
-    if not math.isfinite(minutes) or minutes <= 0:
-        raise ValueError("时间预算须为正数")
-    deadline = time.monotonic() + minutes * 60
+USER_STOPPED = "用户停止"
+
+
+def _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory, *, max_rate=1.0,
+                  allow_unlimited=False):
+    if (type(max_requests) is not int or max_requests < (0 if allow_unlimited else 1)
+            or not math.isfinite(rate) or not 0 < rate <= max_rate):
+        raise ValueError(f"请求上限或频率无效，每秒请求数须大于 0 且不超过 {max_rate:g}")
+    if not math.isfinite(minutes) or minutes < 0 or (not minutes and not allow_unlimited):
+        raise ValueError("时间预算无效")
+    deadline = time.monotonic() + minutes * 60 if minutes else None
 
     def guard():
         if stopped():
-            raise BatchEnded("用户停止")
-        if time.monotonic() >= deadline:
+            raise BatchEnded(USER_STOPPED)
+        if deadline is not None and time.monotonic() >= deadline:
             raise BatchEnded("到达时间预算")
-        if client.stats.requests >= max_requests:
+        if max_requests and client.stats.requests >= max_requests:
             raise BatchEnded("到达请求上限")
 
     client = client_factory(rate=rate, retries=2, timeout=15, raw_dir=str(raw_dir), request_guard=guard)
@@ -388,7 +393,7 @@ def repair(db_path, raw_dir, movie, start, end, scope, codes=(), *, max_requests
 
 
 def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty, recheck_days, emit,
-            on_progress=None):
+            on_progress=None, *, defer_empty_streak=True):
     totals = Counter()
     with closing(db.connect(str(db_path))) as conn:
         try:
@@ -442,7 +447,7 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
                         totals["empty"] += 1
                         consecutive_empty += 1
                         emit(f"{day} {code} HTTP 204，记录为待复核")
-                        if consecutive_empty >= 3:
+                        if defer_empty_streak and consecutive_empty >= 3:
                             if scope not in ("explicit", "roster", "national"):
                                 with conn:
                                     db.put_doc(conn, PROBE, day, day, {"status": "suspect_204"})

@@ -137,12 +137,24 @@ class Client:
         self.last_body: bytes = b""
 
     # ---------- 节流 ----------
+    def _wait(self, seconds: float) -> None:
+        if self.request_guard is None:
+            time.sleep(seconds)
+            return
+        deadline = time.monotonic() + seconds
+        while True:
+            self.request_guard()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.1))
+
     def _throttle(self) -> None:
         if self.dry or self.rate <= 0:
             return
         now = time.monotonic()
         if self._next_at > now:
-            time.sleep(self._next_at - now)
+            self._wait(self._next_at - now)
         step = 1.0 / self.rate + random.uniform(*self.jitter)
         self._next_at = max(time.monotonic(), self._next_at) + step
 
@@ -190,6 +202,8 @@ class Client:
                 self.request_guard()
             t0 = time.time()
             self.stats.requests += 1
+            if attempt > 1:
+                self.stats.retries += 1
             try:
                 req = urllib.request.Request(url, headers=self.headers)
                 with self._open(req, timeout=self.timeout) as resp:
@@ -233,8 +247,7 @@ class Client:
             if attempt < self.retries:
                 if self.request_guard:
                     self.request_guard()
-                self.stats.retries += 1
-                time.sleep(self.backoff[min(attempt - 1, len(self.backoff) - 1)])
+                self._wait(self.backoff[min(attempt - 1, len(self.backoff) - 1)])
 
         self.stats.soft_errors += 1
         raise RetryExhausted(f"{url} :: {last}")

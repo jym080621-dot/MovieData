@@ -1,5 +1,6 @@
 """真实 Tk 窗口交互；仅 HTTP 响应使用离线夹具。"""
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -127,6 +128,9 @@ class NationalGuiTests(unittest.TestCase):
         self.assertEqual(button.winfo_height(), button.winfo_reqheight(), "结果目录按钮被裁切")
         self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
                              self.page.winfo_rooty() + self.page.winfo_height())
+        for control in (self.page.unlimited_button, self.page.stop_button):
+            self.assertTrue(control.winfo_ismapped())
+            self.assertEqual(control.winfo_width(), control.winfo_reqwidth())
 
     def test_resume_progress_restores_cached_cinema_days(self):
         fake = fixtures.MovieHistoryTests()
@@ -140,17 +144,17 @@ class NationalGuiTests(unittest.TestCase):
         collect(fake.conn, fake.client(), fixtures.CODES[0], fixtures.DAY)
         self.page.preview_button.invoke()
         self.wait()
-        self.assertEqual(float(self.page.progress["value"]), 1, "断点未恢复到已核查影院日")
-        self.assertEqual(float(self.page.progress["maximum"]), 2)
+        self.assertEqual(self.page.progress.completed, 1, "断点未恢复到已核查影院日")
+        self.assertEqual(self.page.progress.total, 2)
         fake.routes = [(200, fixtures.box())]
         original_run = national_history.run_plan
         def run(*args, **kwargs):
             return original_run(*args, client_factory=fake.client, **kwargs)
         with patch.object(national_history, "run_plan", side_effect=run):
             self.page.run_button.invoke()
-            self.assertEqual(float(self.page.progress["value"]), 1, "开始下一批时累计值被清零")
+            self.assertEqual(self.page.progress.completed, 1, "开始下一批时累计值被清零")
             self.wait()
-        self.assertEqual(float(self.page.progress["value"]), 2)
+        self.assertEqual(self.page.progress.completed, 2)
         self.assertEqual(len(fake.calls), 2)  # one seeded request and one resumed request
         self.page.destroy()
         self.page = NationalHistoryPage(self.app, fake.path, self.root / "raw", self.root / "out",
@@ -158,7 +162,7 @@ class NationalGuiTests(unittest.TestCase):
         self.page.movie.set(fixtures.MOVIE)
         self.page.preview_button.invoke()
         self.wait()
-        self.assertEqual(float(self.page.progress["value"]), 2, "重新打开页面未读取累计值")
+        self.assertEqual(self.page.progress.completed, 2, "重新打开页面未读取累计值")
 
     def test_request_counter_does_not_overwrite_coverage(self):
         self.page.show_coverage(dict(targets=410208, cached=484))
@@ -169,13 +173,69 @@ class NationalGuiTests(unittest.TestCase):
         while time.monotonic() < deadline:
             self.app.update()
             time.sleep(.01)
-        self.assertEqual(float(self.page.progress["value"]), 484)
-        self.assertEqual(float(self.page.progress["maximum"]), 410208)
+        self.assertEqual(self.page.progress.completed, 484)
+        self.assertEqual(self.page.progress.total, 410208)
         self.assertIn("264 / 3,000", self.page.batch_text.get())
         self.page.cap.set("100")
-        self.assertEqual(float(self.page.progress["value"]), 484)
+        self.assertEqual(self.page.progress.completed, 484)
         self.page.movie.set("123")
-        self.assertEqual(float(self.page.progress["value"]), 0)
+        self.assertEqual(self.page.progress.completed, 0)
+
+    def test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent(self):
+        self.page.show_coverage(dict(targets=410304, cached=613))
+        self.app.update()
+        (segment,) = self.page.progress.find_withtag("coverage")
+        start, _, end, _ = self.page.progress.coords(segment)
+        self.assertGreaterEqual(end - start, 6)
+        self.assertIn("0.15%", self.page.coverage_text.get())
+        self.page.show_coverage(dict(targets=410304, cached=0))
+        self.assertEqual(self.page.progress.itemcget(segment, "state"), "hidden")
+
+    def test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan(self):
+        fake = fixtures.MovieHistoryTests()
+        fake.setUp()
+        self.addCleanup(fake.doCleanups)
+        self.page.db_path = fake.path
+        with fake.conn:
+            history_roster._merge(fake.conn, fixtures.DAY, dict.fromkeys(fixtures.CODES[:2]), "csv:test")
+            history_roster._save_refresh(fake.conn, fixtures.DAY, "test", "thin", 2, 1, 2)
+        fake.routes = [(200, fixtures.box()), (200, fixtures.box())]
+        inflight, release = threading.Event(), threading.Event()
+        original_open = fake.fake_open
+
+        def hold_first(req, timeout):
+            if not inflight.is_set():
+                inflight.set()
+                if not release.wait(4):
+                    raise AssertionError("Test did not release the request")
+            return original_open(req, timeout)
+
+        fake.fake_open = hold_first
+        original_run = national_history.run_plan
+        def run(*args, **kwargs):
+            return original_run(*args, client_factory=fake.client, **kwargs)
+
+        with patch.object(national_history, "run_plan", side_effect=run):
+            self.page.unlimited_button.invoke()
+            self.wait()
+            self.assertEqual(fake.calls, [])
+            self.assertEqual((self.page.cap.get(), self.page.minutes.get()), ("0", "0"))
+            self.assertIn("时间上限 不限", self.page.plan_text.get("1.0", "end"))
+            self.page.unlimited_button.invoke()
+            try:
+                self.assertTrue(inflight.wait(4))
+                self.assertEqual(str(self.page.stop_button["state"]), "normal")
+                self.page.stop_button.invoke()
+            finally:
+                release.set()
+            self.wait()
+            self.assertIn("断点已保存", self.page.status.get())
+            self.assertEqual(self.page.progress.completed, 1)
+            self.assertEqual(self.page.plan["totals"]["pending"], 1)
+            self.page.run_button.invoke()
+            self.wait()
+        self.assertEqual(self.page.progress.completed, 2)
+        self.assertEqual(len(set(fake.calls)), 2)
 
 
 if __name__ == "__main__":

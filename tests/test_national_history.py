@@ -179,6 +179,34 @@ class NationalHistoryTests(unittest.TestCase):
         self.assertIn("offset=1", self.calls[-1])
         self.assertEqual(self.plan()["totals"]["targets"], 2)
 
+    def test_unlimited_run_continues_past_empty_streak_and_saves_audit(self):
+        self.seed(CODES[:4])
+        self.routes = [(204, None)] * 3 + [(200, box())]
+        plan = self.plan(max_requests=0, minutes=0)
+        result = self.run_batch(plan)
+        self.assertEqual((result["requests"], result["empty"], result["saved"]), (4, 3, 1))
+        self.assertFalse(result["national_complete"])
+        self.assertIn("不限", national.format_plan(plan))
+
+    def test_pause_during_retry_wait_leaves_delay_interruptible(self):
+        self.seed(CODES[:1])
+        self.routes = [(503, {})]
+        wait_slices = []
+
+        def client_with_retry(**kwargs):
+            client = self.client(**kwargs)
+            client.backoff = (10,)
+            return client
+
+        with patch("zgdypf.client.time.sleep", side_effect=wait_slices.append):
+            result = national.run_plan(self.plan(max_requests=0, minutes=0), self.root / "raw", self.root / "out",
+                                       stopped=lambda: bool(wait_slices), client_factory=client_with_retry,
+                                       emit=lambda _: None)
+        self.assertEqual(wait_slices, [0.1])
+        self.assertTrue(result["paused"])
+        self.assertEqual((result["requests"], result["retries"]), (1, 0))
+        self.assertEqual(self.plan()["totals"]["pending"], 1)
+
     def test_access_denial_does_not_continue_or_claim_complete(self):
         self.routes = [(429, {"Retry-After": "60"})]
         settings = []
@@ -203,7 +231,7 @@ class NationalHistoryTests(unittest.TestCase):
         self.assertEqual(result["requests"], 1)
 
     def test_invalid_inputs_fail_before_network(self):
-        for options in (dict(rate=5.1), dict(rate=0), dict(rate=float("nan")), dict(minutes=0), dict(max_requests=0)):
+        for options in (dict(rate=5.1), dict(rate=0), dict(rate=float("nan")), dict(minutes=-1), dict(max_requests=-1)):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.plan(**options)
         self.assertFalse(self.calls)

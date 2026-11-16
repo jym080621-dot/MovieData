@@ -48,10 +48,10 @@ def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
     history.validate(movie, start, end, "roster")
     if dt.date.fromisoformat(end) >= dt.date.today():
         raise ValueError("历史采集的结束日期必须早于今天")
-    if type(max_requests) is not int or max_requests < 1:
-        raise ValueError("每批请求上限必须为正整数")
-    if not math.isfinite(minutes) or minutes <= 0 or not math.isfinite(rate) or not 0.1 <= rate <= MAX_RATE:
-        raise ValueError(f"分钟数必须为正数，频率须为 0.1–{MAX_RATE:g} 次/秒")
+    if type(max_requests) is not int or max_requests < 0:
+        raise ValueError("请求上限必须为非负整数，0 表示不限")
+    if not math.isfinite(minutes) or minutes < 0 or not math.isfinite(rate) or not 0.1 <= rate <= MAX_RATE:
+        raise ValueError(f"分钟数须为非负数，0 表示不限。频率须为 0.1–{MAX_RATE:g} 次/秒")
     options = dict(max_requests=max_requests, minutes=minutes, rate=rate,
                    retry_empty=bool(retry_empty), refresh_roster=bool(refresh_roster))
     days, totals = [], Counter()
@@ -137,6 +137,12 @@ def _duration_range(seconds):
     return f"{lo / scale:,.1f}–{hi / scale:,.1f} {unit}"
 
 
+def format_budget(max_requests, minutes):
+    requests = f"{max_requests:,} 次" if max_requests else "不限"
+    duration = f"{minutes:g} 分钟" if minutes else "不限"
+    return f"请求次数上限 {requests}，时间上限 {duration}"
+
+
 def save_plan(plan, out_dir):
     dest = Path(out_dir) / f"plan_{plan['id'][:16]}.json"
     with history._report_file(dest) as temp:
@@ -171,7 +177,7 @@ def format_plan(plan):
             f"当前已知 {t.get('targets', 0):,} 个影院日；可复用 {t.get('cached', 0):,}；"
             f"本轮待补 {t.get('pending', 0):,}；204 待复核 {t.get('deferred_204', 0):,}。\n"
             f"需获取或续取名单 {t.get('roster_days', 0)} 天；仅本地已知的首轮必要请求 {known}。\n"
-            f"本批最多 {o['max_requests']:,} 次 HTTP 请求 / {o['minutes']:g} 分钟 / {o['rate']:g} 次每秒。\n"
+            f"{format_budget(o['max_requests'], o['minutes'])}，每秒最多 {o['rate']:g} 次。\n"
             f"204 重试：{'是' if o['retry_empty'] else '否'}；重新核实名单：{'是' if o['refresh_roster'] else '否'}。\n"
             f"{plan['execution']}\n{NOTICE}")
 
@@ -236,7 +242,7 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
     save_plan(plan, out_dir)
     o = plan["options"]
     client, guard = history._batch_client(raw_dir, o["rate"], o["max_requests"], o["minutes"], stopped, client_factory,
-                                         max_rate=MAX_RATE)
+                                         max_rate=MAX_RATE, allow_unlimited=True)
     progress("核实逐日影院名单", 0)
     def roster_log(message):
         emit(message)
@@ -259,12 +265,18 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
         progress("逐影院补采完整片目", client.stats.requests)
         detail = history._repair(db_path, plan["movie"], plan["start"], plan["end"], "national", (),
                                  client, guard, o["retry_empty"], False, emit,
-                                 on_progress=detail_progress)
+                                 on_progress=detail_progress,
+                                 defer_empty_streak=bool(o["max_requests"] or o["minutes"]))
+    failed = bool(roster.get("failed") or detail.get("failed") or detail.get("errors"))
+    reason = roster.get("stopped") or detail.get("stopped")
+    if reason is None and stopped():
+        reason = history.USER_STOPPED
     result = dict(requests=client.stats.requests, retries=client.stats.retries,
                   saved=detail.get("ok", 0), empty=detail.get("empty", 0),
-                  failed=bool(roster.get("failed") or detail.get("failed") or detail.get("errors")),
-                  reason=roster.get("stopped") or detail.get("stopped") or "本批处理结束",
+                  failed=failed, paused=reason == history.USER_STOPPED,
+                  reason=reason or "本批处理结束",
                   national_complete=False)
+    on_coverage(dict(baseline, cached=baseline.get("cached", 0) + result["saved"]))
     progress("生成逐日审计及 CSV", client.stats.requests)
     result["reports"] = export_audit(db_path, out_dir, plan["movie"], plan["start"], plan["end"])
     on_coverage(coverage_from_summary(result["reports"]["summary"]))

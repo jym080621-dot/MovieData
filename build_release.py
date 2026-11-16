@@ -41,13 +41,14 @@ SRC_FILES = [
     "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py",
     "启动全国全影院历史.bat", "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md",
     "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "MovieData_v1.4.2_使用说明.md",
+    "MovieData_v1.5.0_使用说明.md",
     "sample.csv", "LICENSE",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png", "ui_national_v1.4.1.png"]
 PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png",
              "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png",
              "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "ui_national_v1.4.1.png",
-             "MovieData_v1.4.2_使用说明.md"]
+             "MovieData_v1.4.2_使用说明.md", "MovieData_v1.5.0_使用说明.md"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================

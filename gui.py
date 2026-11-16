@@ -48,6 +48,7 @@ def _yesterday() -> str:
 class App(tk.Tk):
     def __init__(self, selftest: bool = False):
         super().__init__()
+        self.protocol("WM_DELETE_WINDOW", self.close)
         self.selftest = selftest
         self.title(f"中国电影票房采集器 · MovieData v{__version__}")
         self.geometry("1260x905+60+20")
@@ -593,6 +594,13 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         self.poll_id = self.after(120, self._poll)
+
+    def close(self):
+        page = getattr(self, "national_page", None)
+        if page is not None and page.winfo_exists() and page.busy:
+            page.close(after=self.destroy)
+        else:
+            self.destroy()
 
     def destroy(self):
         if hasattr(self, "poll_id"):

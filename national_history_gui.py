@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import queue
+import sqlite3
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -10,6 +11,29 @@ from tkinter import filedialog, ttk
 
 from zgdypf import __version__, db, history_roster, movie_history
 from zgdypf import national_history as national
+
+
+class CoverageBar(tk.Canvas):
+    """Draw a visible mark even when the proportional fill is only a few pixels."""
+
+    def __init__(self, parent):
+        super().__init__(parent, height=14, background="#dce5f0", highlightthickness=0, borderwidth=0)
+        self.completed = self.total = 0
+        self.segment = self.create_rectangle(0, 0, 0, 0, fill="#2563eb", width=0, tags="coverage", state="hidden")
+        self.bind("<Configure>", self.redraw)
+
+    def set_counts(self, completed, total):
+        self.completed, self.total = completed, total
+        self.redraw()
+
+    def redraw(self, _event=None):
+        if not self.completed or not self.total:
+            self.itemconfigure(self.segment, state="hidden")
+            return
+        width, height = self.winfo_width(), self.winfo_height()
+        fill = min(width, max(6, int(width * self.completed / self.total)))
+        self.coords(self.segment, 0, 0, fill, height)
+        self.itemconfigure(self.segment, state="normal")
 
 
 class NationalHistoryPage(tk.Toplevel):
@@ -22,6 +46,7 @@ class NationalHistoryPage(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.plan = None
         self.busy = False
+        self.close_callback = None
         self.events = queue.Queue()
         self.stop_event = threading.Event()
         self.selected = None
@@ -49,7 +74,7 @@ class NationalHistoryPage(tk.Toplevel):
         self.open_button.pack(side="bottom", anchor="e", pady=(4, 0))
         self.coverage_label = ttk.Label(footer, textvariable=self.coverage_text)
         self.coverage_label.pack(fill="x")
-        self.progress = ttk.Progressbar(footer, maximum=1)
+        self.progress = CoverageBar(footer)
         self.progress.pack(fill="x", pady=(3, 4))
         self.batch_label = ttk.Label(footer, textvariable=self.batch_text)
         self.batch_label.pack(fill="x")
@@ -78,14 +103,20 @@ class NationalHistoryPage(tk.Toplevel):
         self.choices.bind("<<ComboboxSelected>>", self.choose)
         dates = ttk.Frame(header)
         dates.pack(fill="x", pady=5)
-        for title, variable, width in (("开始日期", self.start, 13), ("结束日期", self.end, 13),
-                                        ("每批请求上限", self.cap, 7), ("分钟", self.minutes, 6)):
-            ttk.Label(dates, text=title).pack(side="left", padx=(0, 5))
-            entry = ttk.Entry(dates, textvariable=variable, width=width)
-            entry.pack(side="left", padx=(0, 12))
-            self.controls.append(entry)
-        ttk.Label(dates, text="次/秒上限").pack(side="left", padx=(0, 5))
-        self.rate_choice = ttk.Combobox(dates, textvariable=self.rate, values=(1, 2, 3, 4, 5), width=5)
+        budget = ttk.Frame(header)
+        budget.pack(fill="x", pady=3)
+        for row, fields in ((dates, (("开始日期", self.start, 13), ("结束日期", self.end, 13))),
+                            (budget, (("请求上限", self.cap, 7), ("分钟", self.minutes, 6)))):
+            for title, variable, width in fields:
+                ttk.Label(row, text=title).pack(side="left", padx=(0, 5))
+                entry = ttk.Entry(row, textvariable=variable, width=width)
+                entry.pack(side="left", padx=(0, 12))
+                self.controls.append(entry)
+        self.unlimited_button = ttk.Button(budget, text="一键查询全量数据（无限制）", command=self.unlimited)
+        self.unlimited_button.pack(side="left", padx=(0, 12))
+        self.controls.append(self.unlimited_button)
+        ttk.Label(budget, text="次/秒上限").pack(side="left", padx=(0, 5))
+        self.rate_choice = ttk.Combobox(budget, textvariable=self.rate, values=(1, 2, 3, 4, 5), width=5)
         self.rate_choice.pack(side="left")
         self.controls.append(self.rate_choice)
         options = ttk.Frame(header)
@@ -101,9 +132,9 @@ class NationalHistoryPage(tk.Toplevel):
         actions.pack(fill="x", pady=(8, 10))
         self.preview_button = ttk.Button(actions, text="① 生成离线执行计划", command=self.preview)
         self.preview_button.pack(side="left")
-        self.run_button = ttk.Button(actions, text="② 按计划启动 / 续跑一批", command=self.run, style="Accent.TButton", state="disabled")
+        self.run_button = ttk.Button(actions, text="② 按计划启动 / 继续采集", command=self.run, style="Accent.TButton", state="disabled")
         self.run_button.pack(side="left", padx=8)
-        self.stop_button = ttk.Button(actions, text="暂停", command=self.stop, state="disabled")
+        self.stop_button = ttk.Button(actions, text="暂停并保存断点", command=self.stop, style="Stop.TButton", state="disabled")
         self.stop_button.pack(side="left")
         self.export_button = ttk.Button(actions, text="导出当前 CSV / 审计", command=self.export)
         self.export_button.pack(side="right")
@@ -171,8 +202,15 @@ class NationalHistoryPage(tk.Toplevel):
     def show_coverage(self, totals):
         done, targets = totals.get("cached", 0), totals.get("targets", 0)
         self.coverage_selection = self.selection()
-        self.progress.configure(maximum=max(1, targets), value=done)
-        percent = f"（{done / targets:.2%}）" if targets else "（名单数量待核实）"
+        self.progress.set_counts(done, targets)
+        if not targets:
+            percent = "（名单数量待核实）"
+        elif 0 < done / targets < 0.0001:
+            percent = "（<0.01%）"
+        elif done < targets and done / targets >= 0.99995:
+            percent = "（>99.99%）"
+        else:
+            percent = f"（{done / targets:.2%}）"
         suffix = "；名单仍待补充，分母可能增加" if totals.get("roster_days") else ""
         self.coverage_text.set(f"已知名单累计核查：{done:,} / {targets:,} 个影院日 {percent}{suffix}")
 
@@ -182,6 +220,8 @@ class NationalHistoryPage(tk.Toplevel):
         if not append:
             widget.delete("1.0", "end")
         widget.insert("end", text + "\n")
+        if append and int(widget.index("end-1c").split(".")[0]) > 2200:
+            widget.delete("1.0", "201.0")
         widget.see("end" if append else "1.0")
         widget.configure(state="disabled")
 
@@ -189,7 +229,7 @@ class NationalHistoryPage(tk.Toplevel):
         self.plan = None
         self.run_button.configure(state="disabled")
         if self.coverage_selection != self.selection():
-            self.progress.configure(value=0, maximum=1)
+            self.progress.set_counts(0, 0)
             self.coverage_text.set("当前影片 / 日期的累计进度：生成计划后读取断点")
         if not self.busy:
             self.status.set("条件已改变，请重新生成离线执行计划。")
@@ -215,6 +255,20 @@ class NationalHistoryPage(tk.Toplevel):
             return plan
         self.begin("plan", work)
 
+    def unlimited(self):
+        if self.busy or self.app._running:
+            return
+        if self.plan and not (self.plan["options"]["max_requests"] or self.plan["options"]["minutes"]):
+            self.run()
+            return
+        self.cap.set("0")
+        self.minutes.set("0")
+        self.preview()
+
+    def request_count_text(self, count):
+        limit = f" / {self.batch_limit:,}" if self.batch_limit else ""
+        return f"本批请求 {count:,}{limit} 次"
+
     def run(self):
         if self.plan is None:
             self.status.set("请先生成并审查执行计划。")
@@ -223,12 +277,27 @@ class NationalHistoryPage(tk.Toplevel):
         self.show_coverage(approved["totals"])
         self.batch_limit = approved["options"]["max_requests"]
         self.batch_minutes = approved["options"]["minutes"]
-        self.batch_text.set(f"本批请求 0 / {self.batch_limit:,} 次；时间上限 {self.batch_minutes:g} 分钟。")
-        self.begin("run", lambda: national.run_plan(
-            approved, self.raw_dir, self.out_dir, stopped=self.stop_event.is_set,
-            emit=lambda msg: self.events.put(("log", msg)),
-            progress=lambda text, count: self.events.put(("progress", text, count)),
-            on_coverage=lambda totals: self.events.put(("coverage", totals))))
+        budget = national.format_budget(self.batch_limit, self.batch_minutes)
+        self.batch_text.set(f"{self.request_count_text(0)} · {budget}")
+
+        def work():
+            result = national.run_plan(
+                approved, self.raw_dir, self.out_dir, stopped=self.stop_event.is_set,
+                emit=lambda msg: self.events.put(("log", msg)),
+                progress=lambda text, count: self.events.put(("progress", text, count)),
+                on_coverage=lambda totals: self.events.put(("coverage", totals)),
+            )
+            if result["paused"]:
+                try:
+                    opts = dict(approved["options"], refresh_roster=False)
+                    resume = national.make_plan(self.db_path, approved["movie"], approved["start"], approved["end"], **opts)
+                    national.save_plan(resume, self.out_dir)
+                    result["resume_plan"] = resume
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    self.events.put(("log", f"断点已保存，续跑计划需手动生成：{exc}"))
+            return result
+
+        self.begin("run", work)
 
     def search(self, remote):
         query = self.movie.get().strip()
@@ -285,11 +354,19 @@ class NationalHistoryPage(tk.Toplevel):
                 event = self.events.get_nowait()
                 if event[0] == "done":
                     self.finish(*event[1:])
+                    if self.close_callback:
+                        self.close_callback()
+                        return
                 elif event[0] == "log":
                     self._write(self.logs, event[1], True)
                 elif event[0] == "progress":
-                    self.status.set(event[1])
-                    self.batch_text.set(f"本批请求 {event[2]:,} / {self.batch_limit:,} 次；时间上限 {self.batch_minutes:g} 分钟，任一达到即暂停。")
+                    exporting = event[1] == "生成逐日审计及 CSV"
+                    if exporting or not self.stop_event.is_set():
+                        self.status.set(event[1])
+                    if exporting:
+                        self.stop_button.configure(state="disabled")
+                    budget = national.format_budget(self.batch_limit, self.batch_minutes)
+                    self.batch_text.set(f"{self.request_count_text(event[2])} · {budget}")
                 elif event[0] == "coverage":
                     self.show_coverage(event[1])
         except queue.Empty:
@@ -308,16 +385,7 @@ class NationalHistoryPage(tk.Toplevel):
             self._write(self.logs, error, True)
             return
         if mode == "plan":
-            self.plan = result
-            self.show_coverage(result["totals"])
-            self._write(self.plan_text, national.format_plan(result))
-            self.table.delete(*self.table.get_children())
-            for row in result["days"]:
-                states = row["states"]
-                self.table.insert("", "end", values=(row["date"], row["targets"], row["cached"], row["pending"],
-                    states.get("empty_204", 0) + states.get("deferred_204", 0), row["roster_status"]))
-            self.tabs.select(0)
-            self.run_button.configure(state="normal")
+            self.display_plan(result)
             self.status.set(f"计划已保存 · {result['id'][:16]} · 审查后点击第二步启动。")
         elif mode == "search":
             self.results, self.selected = result, None
@@ -327,15 +395,33 @@ class NationalHistoryPage(tk.Toplevel):
         elif mode == "run":
             self.refresh.set(False)
             self.show_coverage(national.coverage_from_summary(result["reports"]["summary"]))
-            self.batch_text.set(f"本批请求 {result['requests']:,} / {self.batch_limit:,} 次；{result['reason']}。累计核查进度已保存。")
-            self.status.set(f"{'本批有异常 · ' if result['failed'] else ''}{result['reason']} · 请求 {result['requests']:,} 次 · 核查 {result['saved']:,} 个影院日 · CSV 已导出。继续时请重新生成计划。")
+            reason = "已暂停，断点已保存" if result["paused"] else result["reason"]
+            self.batch_text.set(f"{self.request_count_text(result['requests'])} · {reason}")
+            next_plan = result.get("resume_plan")
+            next_step = "已准备续跑计划，审查后可继续。" if next_plan else "继续时请重新生成计划。"
+            self.status.set(f"{'本批有异常 · ' if result['failed'] else ''}{reason} · 核查 {result['saved']:,} 个影院日 · CSV 已导出。{next_step}")
             self._write(self.logs, self.status.get(), True)
-            self.tabs.select(2)
+            if next_plan:
+                self.display_plan(next_plan)
+            else:
+                self.tabs.select(2)
         elif mode == "export":
             self.show_coverage(national.coverage_from_summary(result["summary"]))
             self.status.set("已导出影院日明细、逐日审计和完整性说明。全国完整性仍未证实。")
         else:
             self.status.set(f"导入 {result['records']:,} 条名单记录，覆盖 {result['days']} 天；请重新生成计划。")
+
+    def display_plan(self, plan):
+        self.plan = plan
+        self.show_coverage(plan["totals"])
+        self._write(self.plan_text, national.format_plan(plan))
+        self.table.delete(*self.table.get_children())
+        for row in plan["days"]:
+            states = row["states"]
+            self.table.insert("", "end", values=(row["date"], row["targets"], row["cached"], row["pending"],
+                states.get("empty_204", 0) + states.get("deferred_204", 0), row["roster_status"]))
+        self.tabs.select(0)
+        self.run_button.configure(state="normal")
 
     def stop(self):
         self.stop_event.set()
@@ -349,11 +435,14 @@ class NationalHistoryPage(tk.Toplevel):
         except OSError as exc:
             self.status.set(str(exc))
 
-    def close(self):
+    def close(self, after=None):
+        callback = after or self.destroy
         if self.busy:
-            self.stop()
+            self.close_callback = callback
+            if self.mode in ("run", "search"):
+                self.stop()
         else:
-            self.destroy()
+            callback()
 
     def destroy(self):
         if hasattr(self, "poll_id"):
