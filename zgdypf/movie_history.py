@@ -20,7 +20,7 @@ from .common import MIN_CINEMAS, daterange
 from .export import write_csv
 
 PROBE = "history_cinema_probe"
-SCOPES = ("sample", "ranklist", "explicit", "roster")
+SCOPES = ("sample", "ranklist", "explicit", "roster", "national")
 DAY_STATES = ("with_movie", "without_movie", "empty_204", "deferred_204", "inconsistent", "error", "missing")
 
 
@@ -84,8 +84,8 @@ def _day_plan(conn, movie, day, scope, codes):
     sources = {}
     if scope == "ranklist":
         target = rank
-    elif scope == "roster":
-        sources = history_roster.candidates(conn, day, rank, existing)
+    elif scope in ("roster", "national"):
+        sources = history_roster.candidates(conn, day, rank, existing, include_registry=scope == "national")
         target = sources
     elif scope == "explicit":
         target = codes
@@ -144,7 +144,7 @@ ROSTER_FIELDS = ("date", "cinema_code", "sources", "slice_status")
 
 
 def _audit_days(conn, movie, start, end, scope, codes, gaps_writer, roster_writer, plan=None):
-    refreshes = history_roster.stored_refreshes(conn) if scope == "roster" else {}
+    refreshes = history_roster.stored_refreshes(conn) if scope in ("roster", "national") else {}
     for day in daterange(start, end):
         known, probe, rank, usable_rank, states, sources = _day_plan(conn, movie, day, scope, codes)
         counts = Counter(states.values())
@@ -190,9 +190,9 @@ def _audit_days(conn, movie, start, end, scope, codes, gaps_writer, roster_write
             national_rank[0] if national_rank else None, national_detail[0] if national_detail else None,
             refresh["status"] if refresh else None, refresh["checked_at"] if refresh else None,
             refresh["row_count"] if refresh else None,
-            *(origin_counts[k] if scope == "roster" else None
+            *(origin_counts[k] if scope in ("roster", "national") else None
               for k in ("local_rank", history_roster.SITE, "csv", "local_detail")),
-            "unverified" if scope == "roster" else None,
+            "unverified" if scope in ("roster", "national") else None,
         )
 
 
@@ -229,7 +229,7 @@ def export_reports(db_path, out_root, movie, start, end, scope, codes=(), *, det
     audit = prefix.with_name(prefix.name + f"_{scope}_audit.csv")
     gaps = prefix.with_name(prefix.name + f"_{scope}_gaps.csv")
     detail = prefix.with_name(prefix.name + "_details.csv")
-    roster = prefix.with_name(prefix.name + "_roster.csv") if scope == "roster" else None
+    roster = prefix.with_name(prefix.name + "_roster.csv") if scope in ("roster", "national") else None
     with open_readonly(db_path) as conn:
         n = None
         if details:
@@ -269,7 +269,7 @@ def _count_day_plan(totals, scope, usable, probe, refresh, counts, retry_empty=F
         pending += deferred
     totals.update(targets=count, gaps=pending, observed=counts["with_movie"] + counts["without_movie"],
                   with_movie=counts["with_movie"], deferred=deferred)
-    if scope == "roster":
+    if scope in ("roster", "national"):
         if not refresh or refresh["status"] == "fetching":
             totals["pending_roster_days"] += 1
         if (refresh and refresh["status"] != "listed") or (not refresh and not usable):
@@ -277,7 +277,7 @@ def _count_day_plan(totals, scope, usable, probe, refresh, counts, retry_empty=F
     if not count or scope == "ranklist" and not usable:
         totals["missing_scope_days"] += 1
     elif pending:
-        if scope in ("explicit", "roster"):
+        if scope in ("explicit", "roster", "national"):
             totals["plannable"] += pending
         elif not recheck_days and _recent_unavailable(probe):
             totals["cooldown_days"] += 1
@@ -289,7 +289,7 @@ def plan_totals(db_path, movie, start, end, scope, codes=(), *, retry_empty=Fals
     validate(movie, start, end, scope, codes)
     totals = Counter()
     with open_readonly(db_path) as conn:
-        refreshes = history_roster.stored_refreshes(conn) if scope == "roster" else {}
+        refreshes = history_roster.stored_refreshes(conn) if scope in ("roster", "national") else {}
         for day in daterange(start, end):
             _, probe, _, usable, states, _ = _day_plan(conn, movie, day, scope, codes)
             _count_day_plan(totals, scope, usable, probe, refreshes.get(day), Counter(states.values()),
@@ -397,12 +397,12 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
                 codes_to_fetch = _pending(states, retry_empty)
                 if not codes_to_fetch or scope == "ranklist" and not usable_rank:
                     continue
-                if scope == "roster":
+                if scope in ("roster", "national"):
                     current = history_roster.latest_site_codes(conn, day)
                     codes_to_fetch.sort(key=lambda code: (
                         states[code] in ("deferred_204", "empty_204"), code not in current,
                     ))
-                if scope not in ("explicit", "roster"):
+                if scope not in ("explicit", "roster", "national"):
                     if not recheck_days and _recent_unavailable(probe):
                         totals["skipped_days"] += 1
                         continue
@@ -426,11 +426,11 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
                     try:
                         result, count = collect(conn, client, code, day)
                     except (BadPayload, HardError, RetryExhausted) as exc:
-                        if isinstance(exc, AccessLimited):
-                            raise
                         with conn:
                             db.ledger_put(conn, CLI_JOB, f"{code}|{day}", "error", err=str(exc)[:300])
                         totals["errors"] += 1
+                        if isinstance(exc, AccessLimited):
+                            raise
                         consecutive_empty = 0
                         consecutive_bad += 1
                         emit(f"{day} {code} 分片请求失败 · {exc}")
@@ -443,7 +443,7 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
                         consecutive_empty += 1
                         emit(f"{day} {code} HTTP 204，记录为待复核")
                         if consecutive_empty >= 3:
-                            if scope not in ("explicit", "roster"):
+                            if scope not in ("explicit", "roster", "national"):
                                 with conn:
                                     db.put_doc(conn, PROBE, day, day, {"status": "suspect_204"})
                             totals["skipped_days"] += 1

@@ -93,7 +93,7 @@ def stored_refreshes(conn):
     return {r["date"]: r for r in conn.execute("SELECT * FROM history_roster_refresh")}
 
 
-def candidates(conn, day, rank_codes, detail_codes):
+def candidates(conn, day, rank_codes, detail_codes, *, include_registry=False):
     sources = defaultdict(set)
     for code in rank_codes:
         sources[code].add("local_rank")
@@ -106,6 +106,19 @@ def candidates(conn, day, rank_codes, detail_codes):
             (day,),
         ):
             sources[code].add(source)
+    if include_registry:
+        # A day ranking can omit cinemas with no takings. Retain every known ID,
+        # including IDs learned on other days; do not infer opening/closing dates.
+        registry_sql = """
+            SELECT cinema_code FROM dim_cinema
+            UNION SELECT cinema_code FROM fact_cinema_day
+            UNION SELECT cinema_code FROM fact_cinema_movie
+        """
+        if _exists(conn, "history_cinema_roster"):
+            registry_sql += " UNION SELECT cinema_code FROM history_cinema_roster"
+        for (code,) in conn.execute(registry_sql):
+            if valid_code(code):
+                sources[code].add("known_registry_unverified_activity")
     return {code: sorted(sources[code]) for code in sorted(sources)}
 
 

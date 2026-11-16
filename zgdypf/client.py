@@ -216,6 +216,7 @@ class Client:
                     exc.close()
                     raise AccessLimited(f"HTTP {exc.code}{hint}，已停止本批请求") from exc
                 body = exc.read() or b""
+                exc.close()
                 elapsed = int((time.time() - t0) * 1000)
                 if raw_rel:
                     self.dump(raw_rel, body, raw_ext)

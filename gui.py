@@ -24,9 +24,10 @@ from tkinter import filedialog, messagebox, ttk
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import app_root, datasets, db, history_roster, movie_history
+from zgdypf import __version__, app_root, datasets, db, history_roster, movie_history
 from zgdypf.client import Client
 from history_quick_gui import QuickHistoryDialog
+from national_history_gui import NationalHistoryPage
 
 ROOT = app_root()
 DB_PATH = os.path.join(ROOT, "boxoffice.db")
@@ -49,7 +50,7 @@ class App(tk.Tk):
     def __init__(self, selftest: bool = False):
         super().__init__()
         self.selftest = selftest
-        self.title("中国电影票房采集器 · zgdypf")
+        self.title(f"中国电影票房采集器 · MovieData v{__version__}")
         self.geometry("1260x905+60+20")
         self.minsize(1140, 720)
         self.configure(bg=BG)
@@ -108,6 +109,12 @@ class App(tk.Tk):
         self.btn_quick = ttk.Button(head, text="单片全国历史", style="Accent.TButton",
                                     command=self._quick_history_dialog)
         self.btn_quick.pack(side="right", padx=12)
+
+        national_bar = ttk.Frame(self, padding=(18, 0, 18, 5))
+        national_bar.pack(fill="x")
+        self.btn_national = ttk.Button(national_bar, text="全国全影院历史票房采集 →", command=self._national_history_page)
+        self.btn_national.pack(side="left")
+        ttk.Label(national_bar, text="  v1.4.0 · 离线计划 / 分批续跑 / 逐日审计", style="Sub.TLabel").pack(side="left")
 
         body = ttk.Frame(self, padding=(18, 4, 18, 6))
         body.pack(fill="both", expand=True)
@@ -500,6 +507,16 @@ class App(tk.Tk):
                   f"{opts['rate']} req/s", "head")
         threading.Thread(target=self._worker, args=(sel, opts), daemon=True).start()
 
+    def _national_history_page(self):
+        if self._running:
+            return
+        page = getattr(self, "national_page", None)
+        if page is not None and page.winfo_exists():
+            page.lift()
+            return
+        self.national_page = NationalHistoryPage(self, DB_PATH, RAW_DIR,
+            os.path.join(ROOT, "output", "national_history"), self.v_start.get(), self.v_end.get())
+
     def _quick_history_dialog(self):
         if not self._running:
             defaults = self.quick_defaults or ("", self.v_start.get(), self.v_end.get(), "20")
@@ -740,7 +757,12 @@ class App(tk.Tk):
                         self.after(200, self.destroy)
         except queue.Empty:
             pass
-        self.after(120, self._poll)
+        self.poll_id = self.after(120, self._poll)
+
+    def destroy(self):
+        if hasattr(self, "poll_id"):
+            self.after_cancel(self.poll_id)
+        super().destroy()
 
     def _finish(self, stats, net, elapsed):
         if stats.get("budget"):
@@ -787,6 +809,8 @@ def main() -> int:
         app.after(150, app._check_data_folder)
     if "--quick-history" in sys.argv:
         app.after(100, app._quick_history_dialog)
+    if "--national-history" in sys.argv:
+        app.after(100, app._national_history_page)
     if selftest:
         app.withdraw()
         app.v_start.set(_yesterday())

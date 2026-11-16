@@ -5,7 +5,7 @@
 产出（都在 dist/ 下）：
   1. 电影票房采集器_v<ver>_win64/      可执行程序目录（exe + 说明 + 文档）
      电影票房采集器_v<ver>_win64.zip   上面这个目录的压缩包
-  2. MovieData_源码_<date>.zip         源码备份（无数据库、无 raw、无 output）
+  2. MovieData_v<ver>_source.zip       源码备份（无数据库、无 raw、无 output）
 
 用法：
   python build_release.py            # 只打包（exe 已存在则复用）
@@ -28,20 +28,23 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
-VER = "1.3.3"
+from zgdypf import __version__ as VER
 DATE = dt.date.today().strftime("%Y%m%d")
 APP_NAME = "MovieData"
 EXE = os.path.join(DIST, APP_NAME + ".exe")
 
 SRC_FILES = [
-    "gui.py", "history_quick_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
+    ".gitignore",
+    "gui.py", "history_quick_gui.py", "national_history_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
     "启动采集器.bat", "启动单片全国历史.bat", "launch_source.bat", "启动说明.txt",
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
-    "tests/test_movie_history.py",
+    "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py",
+    "启动全国全影院历史.bat", "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md",
     "sample.csv", "LICENSE",
 ]
-DOC_IMAGES = ["ui_all.png", "ui_running.png"]
-PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png"]
+DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png"]
+PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png",
+             "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================
@@ -49,6 +52,8 @@ START_TXT = """电影票房采集器 v{ver}
 一、怎么启动
    先完整解压，再双击「{name}.exe」。本包自带运行环境。
    若只用单片全国历史，双击「打开单片全国历史.bat」进入快捷窗口。
+   v1.4.0 新页面：双击「打开全国全影院历史.bat」。先生成离线计划，再按计划启动。
+   新页面的操作与完整性限制见「MovieData_v1.4.0_使用说明.md」。
 
 二、数据存在哪
    采集时在本文件所在目录创建：
@@ -98,11 +103,17 @@ def build_exe() -> None:
 
 def make_program_dir() -> str:
     pkg = os.path.join(DIST, f"{APP_NAME}_v{VER}_win64")
-    shutil.rmtree(pkg, ignore_errors=True)
+    target = Path(pkg).resolve()
+    if target.parent != Path(DIST).resolve() or target.name != f"{APP_NAME}_v{VER}_win64":
+        raise ValueError("打包目录越界")
+    if target.exists():
+        shutil.rmtree(target)
     os.makedirs(pkg, exist_ok=True)
     shutil.copy2(EXE, os.path.join(pkg, APP_NAME + ".exe"))
     with open(os.path.join(pkg, "打开单片全国历史.bat"), "w", encoding="ascii", newline="\r\n") as fh:
         fh.write('@echo off\nstart "" "%~dp0' + APP_NAME + '.exe" --quick-history\n')
+    with open(os.path.join(pkg, "打开全国全影院历史.bat"), "w", encoding="ascii", newline="\r\n") as fh:
+        fh.write('@echo off\nstart "" "%~dp0' + APP_NAME + '.exe" --national-history\n')
     for f in PKG_FILES:
         src = os.path.join(ROOT, f)
         if os.path.exists(src):
@@ -124,8 +135,8 @@ def zip_dir(src_dir: str, zip_path: str) -> None:
 
 
 def zip_sources() -> str:
-    zip_path = os.path.join(DIST, f"MovieData_源码_{DATE}.zip")
-    top = f"MovieData_源码_{DATE}"
+    zip_path = os.path.join(DIST, f"MovieData_v{VER}_source.zip")
+    top = f"MovieData_v{VER}_source"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for f in SRC_FILES + DOC_IMAGES:
             p = os.path.join(ROOT, f)

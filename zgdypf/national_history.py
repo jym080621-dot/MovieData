@@ -1,0 +1,188 @@
+"""全国历史页面的离线计划、受限执行和严格审计。不会推断全国名单完整。"""
+from __future__ import annotations
+
+import csv
+import datetime as dt
+import hashlib
+import json
+import math
+from collections import Counter
+from contextlib import closing, contextmanager
+from pathlib import Path
+from uuid import uuid4
+
+from . import db, history_roster, movie_history as history
+from .client import Client
+from .common import daterange
+
+NOTICE = "全国完整性未证实：站点逐日榜单和补充名单无法证明覆盖全国每一家影院；不得作为全国完整数据。"
+LABELS = {
+    "with_movie": "有目标影片", "without_movie": "完整片目中无目标影片",
+    "empty_204": "HTTP 204 待复核", "deferred_204": "HTTP 204 待复核",
+    "inconsistent": "明细不自洽", "error": "请求异常", "missing": "未采集",
+}
+
+
+@contextmanager
+def snapshot(path):
+    if Path(path).is_file():
+        with history.open_readonly(path) as conn:
+            yield conn
+    else:
+        # A preview must neither create a database nor construct a network client.
+        with closing(db.connect(":memory:")) as conn:
+            yield conn
+
+
+def _hash(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
+              rate=1.0, retry_empty=False, refresh_roster=False):
+    history.validate(movie, start, end, "roster")
+    if dt.date.fromisoformat(end) >= dt.date.today():
+        raise ValueError("历史采集的结束日期必须早于今天")
+    if type(max_requests) is not int or max_requests < 1:
+        raise ValueError("每批请求上限必须为正整数")
+    if not math.isfinite(minutes) or minutes <= 0 or not math.isfinite(rate) or not 0 < rate <= 1:
+        raise ValueError("分钟数必须为正数；每秒请求数须大于 0 且不超过 1")
+    options = dict(max_requests=max_requests, minutes=minutes, rate=rate,
+                   retry_empty=bool(retry_empty), refresh_roster=bool(refresh_roster))
+    days, totals = [], Counter()
+    with snapshot(db_path) as conn:
+        refreshes = history_roster.stored_refreshes(conn)
+        for day in daterange(start, end):
+            _, _, _, _, states, sources = history._day_plan(conn, movie, day, "national", ())
+            counts = Counter(states.values())
+            record = refreshes.get(day)
+            refresh = bool(refresh_roster or not record or record["status"] == "fetching")
+            pending = len(history._pending(states, retry_empty))
+            row = dict(date=day, targets=len(states), cached=counts["with_movie"] + counts["without_movie"],
+                       pending=pending, states=dict(counts), roster_request_needed=refresh,
+                       roster_status=record["status"] if record else "not_collected",
+                       roster_rows=record["row_count"] if record else 0,
+                       roster_offset=record["next_offset"] if record else 0,
+                       evidence_hash=_hash([states, sources, dict(record) if record else None]),
+                       national_complete=False)
+            days.append(row)
+            totals.update(targets=len(states), cached=row["cached"], pending=pending,
+                          roster_days=int(refresh), deferred_204=counts["empty_204"] + counts["deferred_204"])
+    logical_min = totals["pending"] + totals["roster_days"]
+    plan = dict(version="1.4.0", scope="national_all_cinemas", database=str(Path(db_path).resolve()),
+                movie=movie, start=start, end=end, options=options, days=days, totals=dict(totals),
+                first_attempt_requests_min=logical_min,
+                first_attempt_requests_exact=None if totals["roster_days"] else logical_min,
+                rate_only_minutes_min=max(0, logical_min - 1) / rate / 60,
+                national_complete=False, notice=NOTICE,
+                execution="先续取逐日名单全部分页，再逐家补采；新发现影院全部入队。批次额度仅限制本批请求，不限制目标影院总数。重试也计入额度。")
+    plan["id"] = _hash(plan)
+    return plan
+
+
+def save_plan(plan, out_dir):
+    dest = Path(out_dir) / f"plan_{plan['id'][:16]}.json"
+    with history._report_file(dest) as temp:
+        temp.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    return dest
+
+
+def format_plan(plan):
+    t, o = plan["totals"], plan["options"]
+    exact = plan["first_attempt_requests_exact"]
+    estimate = f"{exact:,} 次" if exact is not None else f"至少 {plan['first_attempt_requests_min']:,} 次（名单未齐，总数未知）"
+    return (f"影片编码 {plan['movie']}　|　{plan['start']} 至 {plan['end']}（含首尾）\n"
+            f"固定范围：全国全部影院；不抽样、不设 Top N、不按票房覆盖率截断。\n"
+            f"当前已知 {t.get('targets', 0):,} 个影院日；可复用 {t.get('cached', 0):,}；"
+            f"本轮待补 {t.get('pending', 0):,}；204 待复核 {t.get('deferred_204', 0):,}。\n"
+            f"需获取或续取名单 {t.get('roster_days', 0)} 天；首轮必要请求 {estimate}。\n"
+            f"仅按限速计算至少 {plan['rate_only_minutes_min']:.1f} 分钟，另加响应耗时、抖动和重试；未知名单无法给出总耗时。\n"
+            f"本批最多 {o['max_requests']:,} 次 HTTP 请求 / {o['minutes']:g} 分钟 / {o['rate']:g} 次每秒。\n"
+            f"204 重试：{'是' if o['retry_empty'] else '否'}；重新核实名单：{'是' if o['refresh_roster'] else '否'}。\n"
+            f"{plan['execution']}\n{NOTICE}")
+
+
+def export_audit(db_path, out_dir, movie, start, end):
+    history.validate(movie, start, end, "roster")
+    root = Path(out_dir) / f"{movie}_{start}_{end}"
+    paths = {key: root.with_name(root.name + suffix) for key, suffix in (
+        ("matrix", "_cinema_days.csv"), ("audit", "_daily_audit.csv"), ("summary", "_summary.json"))}
+    totals = Counter()
+    daily = []
+    with snapshot(db_path) as conn, history._report_file(paths["matrix"]) as temp:
+        refreshes = history_roster.stored_refreshes(conn)
+        with temp.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(("date", "cinema_code", "cinema_name", "movie_code", "status", "status_zh",
+                             "sales_fen", "sales_yuan", "roster_sources", "national_complete"))
+            for day in daterange(start, end):
+                _, _, _, _, states, sources = history._day_plan(conn, movie, day, "national", ())
+                values = {r[0]: r[1] for r in conn.execute(
+                    "SELECT cinema_code,sales_fen FROM fact_cinema_movie WHERE date=? AND movie_code=?", (day, movie))}
+                names = dict(conn.execute("SELECT cinema_code,cinema_name FROM dim_cinema"))
+                counts = Counter(states.values())
+                for code, state in states.items():
+                    # Only a validated full slice can establish absence. Unknown is never zero.
+                    cents = values.get(code) if state == "with_movie" else 0 if state == "without_movie" else None
+                    yuan = None if cents is None else f"{cents // 100}.{cents % 100:02}"
+                    writer.writerow((day, code, names.get(code), movie, state, LABELS[state], cents,
+                                     yuan, "|".join(sources.get(code, ())), "false"))
+                observed = counts["with_movie"] + counts["without_movie"]
+                refresh = refreshes.get(day)
+                daily.append(dict(date=day, target_count=len(states), observed=observed,
+                                  **{s: counts[s] for s in history.DAY_STATES},
+                                  known_roster_observed=bool(states) and observed == len(states),
+                                  roster_status=refresh["status"] if refresh else "not_collected",
+                                  roster_rows=refresh["row_count"] if refresh else 0,
+                                  national_complete=False, national_roster_coverage="unverified"))
+                totals.update(counts)
+    with history._report_file(paths["audit"]) as temp:
+        with temp.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(daily[0]))
+            writer.writeheader()
+            writer.writerows(daily)
+    summary = dict(movie=movie, start=start, end=end, states=dict(totals), days=daily,
+                   national_complete=False, notice=NOTICE)
+    with history._report_file(paths["summary"]) as temp:
+        temp.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return dict(paths=paths, summary=summary)
+
+
+def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progress=lambda *args: None,
+             client_factory=Client):
+    # Recompute before constructing a client: altered inputs or changed cache require a new review.
+    current = make_plan(plan["database"], plan["movie"], plan["start"], plan["end"], **plan["options"])
+    if current != plan:
+        raise ValueError("计划已变更或本地数据已更新，请重新生成并审查执行计划")
+    db_path = plan["database"]
+    with closing(db.connect(db_path)):
+        pass
+    save_plan(plan, out_dir)
+    o = plan["options"]
+    client, guard = history._batch_client(raw_dir, o["rate"], o["max_requests"], o["minutes"], stopped, client_factory)
+    progress("核实逐日影院名单", 0)
+    def roster_log(message):
+        emit(message)
+        progress("核实逐日影院名单", client.stats.requests)
+
+    roster = history._refresh_roster(db_path, plan["start"], plan["end"], client, guard,
+                                     o["refresh_roster"], roster_log)
+    detail = {}
+    if not roster.get("stopped"):
+        progress("逐影院补采完整片目", client.stats.requests)
+        detail = history._repair(db_path, plan["movie"], plan["start"], plan["end"], "national", (),
+                                 client, guard, o["retry_empty"], False, emit,
+                                 on_progress=lambda day, _: progress(day, client.stats.requests))
+    result = dict(requests=client.stats.requests, retries=client.stats.retries,
+                  saved=detail.get("ok", 0), empty=detail.get("empty", 0),
+                  failed=bool(roster.get("failed") or detail.get("failed") or detail.get("errors")),
+                  reason=roster.get("stopped") or detail.get("stopped") or "本批处理结束",
+                  national_complete=False)
+    progress("生成逐日审计及 CSV", client.stats.requests)
+    result["reports"] = export_audit(db_path, out_dir, plan["movie"], plan["start"], plan["end"])
+    manifest = Path(out_dir) / f"batch_{plan['id'][:16]}_{uuid4().hex[:8]}.json"
+    with history._report_file(manifest) as temp:
+        temp.write_text(json.dumps(dict(plan_id=plan["id"], finished_at=db.now(), **result),
+                                   ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    result["manifest"] = manifest
+    return result
