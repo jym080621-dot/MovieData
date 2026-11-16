@@ -35,25 +35,25 @@ EXE = os.path.join(DIST, APP_NAME + ".exe")
 
 SRC_FILES = [
     ".gitignore",
-    "gui.py", "history_quick_gui.py", "national_history_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
-    "启动采集器.bat", "启动单片全国历史.bat", "launch_source.bat", "启动说明.txt",
+    "gui.py", "national_history_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
+    "启动采集器.bat", "launch_source.bat", "启动说明.txt",
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
     "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py",
     "启动全国全影院历史.bat", "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md",
-    "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md",
+    "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "MovieData_v1.4.2_使用说明.md",
     "sample.csv", "LICENSE",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png", "ui_national_v1.4.1.png"]
 PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png",
              "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png",
-             "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "ui_national_v1.4.1.png"]
+             "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "ui_national_v1.4.1.png",
+             "MovieData_v1.4.2_使用说明.md"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================
 
 一、怎么启动
    先完整解压，再双击「{name}.exe」。本包自带运行环境。
-   若只用单片全国历史，双击「打开单片全国历史.bat」进入快捷窗口。
    全国历史页面：双击「打开全国全影院历史.bat」。先生成离线计划，再按计划启动。
    操作与完整性限制见「MovieData_v{ver}_使用说明.md」。
 
@@ -112,8 +112,6 @@ def make_program_dir() -> str:
         shutil.rmtree(target)
     os.makedirs(pkg, exist_ok=True)
     shutil.copy2(EXE, os.path.join(pkg, APP_NAME + ".exe"))
-    with open(os.path.join(pkg, "打开单片全国历史.bat"), "w", encoding="ascii", newline="\r\n") as fh:
-        fh.write('@echo off\nstart "" "%~dp0' + APP_NAME + '.exe" --quick-history\n')
     with open(os.path.join(pkg, "打开全国全影院历史.bat"), "w", encoding="ascii", newline="\r\n") as fh:
         fh.write('@echo off\nstart "" "%~dp0' + APP_NAME + '.exe" --national-history\n')
     for f in PKG_FILES:

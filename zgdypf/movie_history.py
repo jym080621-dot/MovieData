@@ -301,9 +301,9 @@ class BatchEnded(Exception):
     pass
 
 
-def _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory):
-    if type(max_requests) is not int or max_requests < 1 or not math.isfinite(rate) or not 0 < rate <= 1:
-        raise ValueError("请求上限须为正整数，每秒请求数须大于 0 且不超过 1")
+def _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory, *, max_rate=1.0):
+    if type(max_requests) is not int or max_requests < 1 or not math.isfinite(rate) or not 0 < rate <= max_rate:
+        raise ValueError(f"请求上限须为正整数，每秒请求数须大于 0 且不超过 {max_rate:g}")
     if not math.isfinite(minutes) or minutes <= 0:
         raise ValueError("时间预算须为正数")
     deadline = time.monotonic() + minutes * 60

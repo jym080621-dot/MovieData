@@ -38,6 +38,46 @@ class NationalHistoryTests(unittest.TestCase):
         self.assertEqual(first["first_attempt_requests_min"], 1)
         self.assertFalse(first["national_complete"])
 
+    def test_empty_cache_estimates_full_range_and_scales_with_rate(self):
+        estimates = [national.make_plan(self.root / "missing.db", MOVIE, DAY, "2026-05-01", rate=rate)
+                     for rate in (1, 2, 3, 5)]
+        times = []
+        for plan in estimates:
+            estimate = plan["collection_estimate"]
+            self.assertEqual(estimate["full_requests"], 26_002)
+            self.assertEqual(estimate["remaining_requests"], 26_002)
+            self.assertEqual(plan["first_attempt_requests_min"], 2)
+            self.assertFalse(plan["national_complete"])
+            times.append(estimate["remaining_seconds"][0])
+        self.assertTrue(all(a > b for a, b in zip(times, times[1:])))
+
+    def test_estimate_uses_current_queue_and_rechecks_only_when_selected(self):
+        self.seed()
+        self.routes = [(200, box()), (204, None)]
+        self.run_batch()
+        normal = self.plan()["collection_estimate"]
+        retried = self.plan(retry_empty=True)["collection_estimate"]
+        self.assertEqual(normal["full_requests"], 3)  # 2 cinema days and 1 roster page
+        self.assertEqual(normal["remaining_requests"], 0)
+        self.assertEqual(normal["remaining_seconds"], [0, 0])
+        self.assertEqual(retried["remaining_requests"], 1)
+        self.assertIsNone(normal["reference_cinemas_per_day"])
+
+    def test_estimate_counts_only_remaining_roster_pages_after_resume(self):
+        self.routes = [(200, {"salesRankList": [{"code": CODES[0]}], "hasMore": True})]
+        self.run_batch(self.plan(max_requests=1))
+        estimate = self.plan()["collection_estimate"]
+        self.assertEqual(estimate["roster_requests_full"], 2)
+        self.assertEqual(estimate["roster_requests_remaining"], 1)
+        self.assertEqual(estimate["remaining_requests"], 13_001)
+
+    def test_empty_finished_roster_keeps_national_projection_but_has_no_queue(self):
+        self.seed(())
+        plan = self.plan()
+        self.assertEqual(plan["collection_estimate"]["full_requests"], 13_001)
+        self.assertEqual(plan["collection_estimate"]["remaining_requests"], 0)
+        self.assertIn("当前采集队列为空", national.format_plan(plan))
+
     def test_changed_input_or_database_invalidates_review(self):
         plan = self.plan()
         plan["movie"] = "123"
@@ -141,8 +181,17 @@ class NationalHistoryTests(unittest.TestCase):
 
     def test_access_denial_does_not_continue_or_claim_complete(self):
         self.routes = [(429, {"Retry-After": "60"})]
-        result = self.run_batch()
+        settings = []
+
+        def fast_client(**kwargs):
+            settings.append(kwargs["rate"])
+            return self.client(**kwargs)
+
+        result = national.run_plan(self.plan(rate=5), self.root / "raw", self.root / "out",
+                                   client_factory=fast_client, emit=lambda _: None)
+        self.assertEqual(settings, [5])
         self.assertEqual(result["requests"], 1)
+        self.assertIn("Retry-After=60", result["reason"])
         self.assertTrue(result["failed"])
         self.assertFalse(result["national_complete"])
 
@@ -154,7 +203,7 @@ class NationalHistoryTests(unittest.TestCase):
         self.assertEqual(result["requests"], 1)
 
     def test_invalid_inputs_fail_before_network(self):
-        for options in (dict(rate=2), dict(rate=float("nan")), dict(minutes=0), dict(max_requests=0)):
+        for options in (dict(rate=5.1), dict(rate=0), dict(rate=float("nan")), dict(minutes=0), dict(max_requests=0)):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.plan(**options)
         self.assertFalse(self.calls)

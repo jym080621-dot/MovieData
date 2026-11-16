@@ -42,6 +42,17 @@ class NationalGuiTests(unittest.TestCase):
         self.assertEqual(str(self.page.run_button["state"]), "disabled")
         self.assertEqual(len(self.page.tabs.tabs()), 3)
 
+    def test_main_window_has_one_history_entry(self):
+        def button_texts(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, gui.tk.Toplevel):
+                    continue
+                if child.winfo_class() == "TButton":
+                    yield child.cget("text")
+                yield from button_texts(child)
+        labels = [label for label in button_texts(self.app) if "历史" in label]
+        self.assertEqual(labels, ["全国全影院历史票房采集 →"])
+
     def test_offline_plan_parameter_invalidation_and_export(self):
         with patch("urllib.request.OpenerDirector.open", side_effect=AssertionError("unexpected network")):
             self.page.preview_button.invoke()
@@ -49,7 +60,16 @@ class NationalGuiTests(unittest.TestCase):
             self.assertIsNotNone(self.page.plan, self.page.status.get())
             self.assertFalse((self.root / "boxoffice.db").exists())
             self.assertEqual(str(self.page.run_button["state"]), "normal")
-            self.assertIn("全国完整性未证实", self.page.plan_text.get("1.0", "end"))
+            text = self.page.plan_text.get("1.0", "end")
+            self.assertIn("全国完整性未证实", text)
+            self.assertIn("全程估算", text)
+            self.assertIn("从当前断点估算", text)
+            self.assertEqual(self.page.plan["options"]["rate"], 2)
+            self.page.rate_choice.current(4)
+            self.assertIsNone(self.page.plan)
+            self.page.preview_button.invoke()
+            self.wait()
+            self.assertEqual(self.page.plan["options"]["rate"], 5)
             self.page.cap.set("2")
             self.assertIsNone(self.page.plan)
             self.assertEqual(str(self.page.run_button["state"]), "disabled")

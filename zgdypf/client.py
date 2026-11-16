@@ -23,6 +23,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Mapping, Optional
 
 BASE = "https://zgdypf.zgdypw.cn"
+DEFAULT_JITTER = (0.05, 0.20)
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -106,7 +107,7 @@ class Client:
         self,
         base: str = BASE,
         rate: float = 2.0,
-        jitter: tuple = (0.05, 0.20),
+        jitter: tuple = DEFAULT_JITTER,
         timeout: float = 25.0,
         retries: int = 3,
         backoff: tuple = (1, 4, 16),

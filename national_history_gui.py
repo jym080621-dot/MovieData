@@ -31,7 +31,7 @@ class NationalHistoryPage(tk.Toplevel):
         self.end = tk.StringVar(self, end)
         self.cap = tk.StringVar(self, "3000")
         self.minutes = tk.StringVar(self, "60")
-        self.rate = tk.StringVar(self, "1")
+        self.rate = tk.StringVar(self, f"{national.DEFAULT_RATE:g}")
         self.retry_empty = tk.BooleanVar(self, False)
         self.refresh = tk.BooleanVar(self, False)
         self.status = tk.StringVar(self, "先填写电影及日期，再生成离线计划。")
@@ -79,11 +79,15 @@ class NationalHistoryPage(tk.Toplevel):
         dates = ttk.Frame(header)
         dates.pack(fill="x", pady=5)
         for title, variable, width in (("开始日期", self.start, 13), ("结束日期", self.end, 13),
-                                        ("每批请求上限", self.cap, 7), ("分钟", self.minutes, 6), ("次/秒", self.rate, 5)):
+                                        ("每批请求上限", self.cap, 7), ("分钟", self.minutes, 6)):
             ttk.Label(dates, text=title).pack(side="left", padx=(0, 5))
             entry = ttk.Entry(dates, textvariable=variable, width=width)
             entry.pack(side="left", padx=(0, 12))
             self.controls.append(entry)
+        ttk.Label(dates, text="次/秒上限").pack(side="left", padx=(0, 5))
+        self.rate_choice = ttk.Combobox(dates, textvariable=self.rate, values=(1, 2, 3, 4, 5), width=5)
+        self.rate_choice.pack(side="left")
+        self.controls.append(self.rate_choice)
         options = ttk.Frame(header)
         options.pack(fill="x", pady=4)
         for title, variable in (("重试已有 204（否则保留待复核）", self.retry_empty), ("重新核实名单（含薄名单 / 异常分页）", self.refresh)):
