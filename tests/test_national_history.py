@@ -62,6 +62,21 @@ class NationalHistoryTests(unittest.TestCase):
         self.assertEqual(self.run_batch(other)["requests"], 0)
         self.assertFalse(second["reports"]["summary"]["national_complete"])
 
+    def test_coverage_callback_includes_saved_work_and_new_roster(self):
+        self.routes = [(200, {"salesRankList": [{"code": c} for c in CODES[:2]], "hasMore": False}),
+                       (200, box())]
+        events = []
+        self.run_batch(self.plan(max_requests=2), on_coverage=events.append)
+        self.assertEqual((events[0]["targets"], events[0]["cached"]), (0, 0))
+        self.assertTrue(any(e["targets"] == 2 and e["cached"] == 0 for e in events))
+        self.assertEqual((events[-1]["targets"], events[-1]["cached"]), (2, 1))
+        events.clear()
+        self.routes = [(204, None)]
+        self.run_batch(on_coverage=events.append)
+        self.assertEqual(events[0]["cached"], 1)
+        self.assertEqual(events[-1]["cached"], 1, "204 must not inflate verified coverage")
+        self.assertEqual(events[-1]["deferred_204"], 1)
+
     def test_all_known_cinemas_across_dates_included_without_sampling(self):
         self.seed(CODES[:1])
         with self.conn:

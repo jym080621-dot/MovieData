@@ -10,7 +10,7 @@
   5. 缺字段写 NULL 记日志，不抛异常中断整批。
 """
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 import os as _os
 import sys as _sys

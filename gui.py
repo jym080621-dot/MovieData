@@ -114,7 +114,7 @@ class App(tk.Tk):
         national_bar.pack(fill="x")
         self.btn_national = ttk.Button(national_bar, text="全国全影院历史票房采集 →", command=self._national_history_page)
         self.btn_national.pack(side="left")
-        ttk.Label(national_bar, text="  v1.4.0 · 离线计划 / 分批续跑 / 逐日审计", style="Sub.TLabel").pack(side="left")
+        ttk.Label(national_bar, text=f"  v{__version__} · 离线计划 / 分批续跑 / 逐日审计", style="Sub.TLabel").pack(side="left")
 
         body = ttk.Frame(self, padding=(18, 4, 18, 6))
         body.pack(fill="both", expand=True)

@@ -40,11 +40,13 @@ SRC_FILES = [
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
     "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py",
     "启动全国全影院历史.bat", "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md",
+    "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md",
     "sample.csv", "LICENSE",
 ]
-DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png"]
+DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png", "ui_national_v1.4.1.png"]
 PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png",
-             "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png"]
+             "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png",
+             "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "ui_national_v1.4.1.png"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================
@@ -52,8 +54,8 @@ START_TXT = """电影票房采集器 v{ver}
 一、怎么启动
    先完整解压，再双击「{name}.exe」。本包自带运行环境。
    若只用单片全国历史，双击「打开单片全国历史.bat」进入快捷窗口。
-   v1.4.0 新页面：双击「打开全国全影院历史.bat」。先生成离线计划，再按计划启动。
-   新页面的操作与完整性限制见「MovieData_v1.4.0_使用说明.md」。
+   全国历史页面：双击「打开全国全影院历史.bat」。先生成离线计划，再按计划启动。
+   操作与完整性限制见「MovieData_v{ver}_使用说明.md」。
 
 二、数据存在哪
    采集时在本文件所在目录创建：

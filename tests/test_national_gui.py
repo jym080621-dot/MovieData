@@ -8,7 +8,8 @@ from unittest.mock import patch
 import gui
 import test_movie_history as fixtures
 from national_history_gui import NationalHistoryPage
-from zgdypf import datasets, national_history
+from zgdypf import datasets, national_history, db, history_roster
+from zgdypf.cinema_detail import collect
 
 
 class NationalGuiTests(unittest.TestCase):
@@ -87,6 +88,74 @@ class NationalGuiTests(unittest.TestCase):
         self.assertIn("处理未完成", self.page.status.get())
         self.assertIsNone(self.page.plan)
         self.assertEqual(str(self.page.preview_button["state"]), "normal")
+
+    def test_small_window_keeps_results_button_fully_visible(self):
+        self.page.destroy()
+        self.app.tk.call("tk", "scaling", 2.0)
+        self.page = NationalHistoryPage(self.app, self.root / "boxoffice.db", self.root / "raw",
+                                        self.root / "out", fixtures.DAY, fixtures.DAY)
+        self.page.geometry("960x710+20+20")
+        self.page.status.set("到达时间预算 · 请求 264 次 · 核查 264 个影院日 · CSV 已导出。继续时请重新生成计划。" * 2)
+        self.app.update()
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        button = next(w for w in descendants(self.page)
+                      if w.winfo_class() == "TButton" and w.cget("text") == "打开计划与结果目录")
+        self.assertTrue(button.winfo_ismapped(), "结果目录按钮被挤出窗口")
+        self.assertEqual(button.winfo_height(), button.winfo_reqheight(), "结果目录按钮被裁切")
+        self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
+                             self.page.winfo_rooty() + self.page.winfo_height())
+
+    def test_resume_progress_restores_cached_cinema_days(self):
+        fake = fixtures.MovieHistoryTests()
+        fake.setUp()
+        self.addCleanup(fake.doCleanups)
+        self.page.db_path = fake.path
+        with fake.conn:
+            history_roster._merge(fake.conn, fixtures.DAY, dict.fromkeys(fixtures.CODES[:2]), "csv:test")
+            history_roster._save_refresh(fake.conn, fixtures.DAY, "test", "thin", 2, 1, 2)
+        fake.routes = [(200, fixtures.box())]
+        collect(fake.conn, fake.client(), fixtures.CODES[0], fixtures.DAY)
+        self.page.preview_button.invoke()
+        self.wait()
+        self.assertEqual(float(self.page.progress["value"]), 1, "断点未恢复到已核查影院日")
+        self.assertEqual(float(self.page.progress["maximum"]), 2)
+        fake.routes = [(200, fixtures.box())]
+        original_run = national_history.run_plan
+        def run(*args, **kwargs):
+            return original_run(*args, client_factory=fake.client, **kwargs)
+        with patch.object(national_history, "run_plan", side_effect=run):
+            self.page.run_button.invoke()
+            self.assertEqual(float(self.page.progress["value"]), 1, "开始下一批时累计值被清零")
+            self.wait()
+        self.assertEqual(float(self.page.progress["value"]), 2)
+        self.assertEqual(len(fake.calls), 2)  # one seeded request and one resumed request
+        self.page.destroy()
+        self.page = NationalHistoryPage(self.app, fake.path, self.root / "raw", self.root / "out",
+                                        fixtures.DAY, fixtures.DAY)
+        self.page.movie.set(fixtures.MOVIE)
+        self.page.preview_button.invoke()
+        self.wait()
+        self.assertEqual(float(self.page.progress["value"]), 2, "重新打开页面未读取累计值")
+
+    def test_request_counter_does_not_overwrite_coverage(self):
+        self.page.show_coverage(dict(targets=410208, cached=484))
+        self.page.batch_limit, self.page.batch_minutes = 3000, 5
+        self.page.events.put(("progress", "正在采集", 264))
+        self.app.after(160, lambda: None)
+        deadline = time.monotonic() + .3
+        while time.monotonic() < deadline:
+            self.app.update()
+            time.sleep(.01)
+        self.assertEqual(float(self.page.progress["value"]), 484)
+        self.assertEqual(float(self.page.progress["maximum"]), 410208)
+        self.assertIn("264 / 3,000", self.page.batch_text.get())
+        self.page.cap.set("100")
+        self.assertEqual(float(self.page.progress["value"]), 484)
+        self.page.movie.set("123")
+        self.assertEqual(float(self.page.progress["value"]), 0)
 
 
 if __name__ == "__main__":

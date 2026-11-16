@@ -11,7 +11,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from . import db, history_roster, movie_history as history
+from . import __version__, db, history_roster, movie_history as history
 from .client import Client
 from .common import daterange
 
@@ -69,7 +69,7 @@ def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
             totals.update(targets=len(states), cached=row["cached"], pending=pending,
                           roster_days=int(refresh), deferred_204=counts["empty_204"] + counts["deferred_204"])
     logical_min = totals["pending"] + totals["roster_days"]
-    plan = dict(version="1.4.0", scope="national_all_cinemas", database=str(Path(db_path).resolve()),
+    plan = dict(version=__version__, scope="national_all_cinemas", database=str(Path(db_path).resolve()),
                 movie=movie, start=start, end=end, options=options, days=days, totals=dict(totals),
                 first_attempt_requests_min=logical_min,
                 first_attempt_requests_exact=None if totals["roster_days"] else logical_min,
@@ -149,11 +149,13 @@ def export_audit(db_path, out_dir, movie, start, end):
 
 
 def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progress=lambda *args: None,
+             on_coverage=lambda coverage: None,
              client_factory=Client):
     # Recompute before constructing a client: altered inputs or changed cache require a new review.
     current = make_plan(plan["database"], plan["movie"], plan["start"], plan["end"], **plan["options"])
     if current != plan:
         raise ValueError("计划已变更或本地数据已更新，请重新生成并审查执行计划")
+    on_coverage(dict(current["totals"]))
     db_path = plan["database"]
     with closing(db.connect(db_path)):
         pass
@@ -167,12 +169,22 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
 
     roster = history._refresh_roster(db_path, plan["start"], plan["end"], client, guard,
                                      o["refresh_roster"], roster_log)
+    # Discovering new IDs changes the denominator; never use the per-batch HTTP
+    # allowance as the total work. Reuse the validated plan if no roster was read.
+    baseline = (make_plan(db_path, plan["movie"], plan["start"], plan["end"], **o)
+                if client.stats.requests else current)["totals"]
+    on_coverage(dict(baseline))
+
+    def detail_progress(day, counts):
+        on_coverage(dict(baseline, cached=baseline.get("cached", 0) + counts.get("ok", 0)))
+        progress(day, client.stats.requests)
+
     detail = {}
     if not roster.get("stopped"):
         progress("逐影院补采完整片目", client.stats.requests)
         detail = history._repair(db_path, plan["movie"], plan["start"], plan["end"], "national", (),
                                  client, guard, o["retry_empty"], False, emit,
-                                 on_progress=lambda day, _: progress(day, client.stats.requests))
+                                 on_progress=detail_progress)
     result = dict(requests=client.stats.requests, retries=client.stats.retries,
                   saved=detail.get("ok", 0), empty=detail.get("empty", 0),
                   failed=bool(roster.get("failed") or detail.get("failed") or detail.get("errors")),
@@ -180,9 +192,17 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
                   national_complete=False)
     progress("生成逐日审计及 CSV", client.stats.requests)
     result["reports"] = export_audit(db_path, out_dir, plan["movie"], plan["start"], plan["end"])
+    on_coverage(coverage_from_summary(result["reports"]["summary"]))
     manifest = Path(out_dir) / f"batch_{plan['id'][:16]}_{uuid4().hex[:8]}.json"
     with history._report_file(manifest) as temp:
         temp.write_text(json.dumps(dict(plan_id=plan["id"], finished_at=db.now(), **result),
                                    ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     result["manifest"] = manifest
     return result
+
+
+def coverage_from_summary(summary):
+    states = summary["states"]
+    return dict(targets=sum(states.values()), cached=states.get("with_movie", 0) + states.get("without_movie", 0),
+                deferred_204=states.get("empty_204", 0) + states.get("deferred_204", 0),
+                roster_days=sum(day["roster_status"] in ("not_collected", "fetching") for day in summary["days"]))
