@@ -11,7 +11,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from . import __version__, db, history_roster, movie_history as history
+from . import __version__, db, history_roster, movie_history as history, national_quality as quality
 from .client import Client, DEFAULT_JITTER
 from .common import daterange
 
@@ -44,7 +44,8 @@ def _hash(value):
 
 
 def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
-              rate=DEFAULT_RATE, retry_empty=False, refresh_roster=False):
+              rate=DEFAULT_RATE, retry_empty=False, refresh_roster=False, review_only=False,
+              reviewed_roster_days=()):
     history.validate(movie, start, end, "roster")
     if dt.date.fromisoformat(end) >= dt.date.today():
         raise ValueError("历史采集的结束日期必须早于今天")
@@ -52,8 +53,14 @@ def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
         raise ValueError("请求上限必须为非负整数，0 表示不限")
     if not math.isfinite(minutes) or minutes < 0 or not math.isfinite(rate) or not 0.1 <= rate <= MAX_RATE:
         raise ValueError(f"分钟数须为非负数，0 表示不限。频率须为 0.1–{MAX_RATE:g} 次/秒")
+    if review_only and not refresh_roster:
+        raise ValueError("仅复核异常名单要求开启名单核实")
+    reviewed = sorted(set(reviewed_roster_days))
+    if any(day not in daterange(start, end) for day in reviewed) or reviewed and not review_only:
+        raise ValueError("名单复核断点与当前计划范围不符")
     options = dict(max_requests=max_requests, minutes=minutes, rate=rate,
-                   retry_empty=bool(retry_empty), refresh_roster=bool(refresh_roster))
+                   retry_empty=bool(retry_empty), refresh_roster=bool(refresh_roster),
+                   review_only=bool(review_only), reviewed_roster_days=reviewed)
     days, totals = [], Counter()
     with snapshot(db_path) as conn:
         refreshes = history_roster.stored_refreshes(conn)
@@ -61,15 +68,19 @@ def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
             _, _, _, _, states, sources = history._day_plan(conn, movie, day, "national", ())
             counts = Counter(states.values())
             record = refreshes.get(day)
-            refresh = bool(refresh_roster or not record or record["status"] == "fetching")
+            refresh = day not in reviewed and bool(not record or record["status"] == "fetching" or
+                           refresh_roster and (not review_only or record["status"] != "listed"))
             pending = len(history._pending(states, retry_empty))
+            rotation = list(conn.execute(
+                "SELECT cinema_code,id FROM history_204_review_queue WHERE date=? ORDER BY id", (day,))) if history_roster._exists(conn, "history_204_review_queue") else []
             row = dict(date=day, targets=len(states), cached=counts["with_movie"] + counts["without_movie"],
                        pending=pending, states=dict(counts), roster_request_needed=refresh,
                        roster_status=record["status"] if record else "not_collected",
                        roster_rows=record["row_count"] if record else 0,
                        roster_offset=record["next_offset"] if record else 0,
                        roster_pages=record["pages"] if record else 0,
-                       evidence_hash=_hash([states, sources, dict(record) if record else None]),
+                       evidence_hash=_hash([states, sources, dict(record) if record else None,
+                                           [tuple(r) for r in rotation]]),
                        national_complete=False)
             days.append(row)
             totals.update(targets=len(states), cached=row["cached"], pending=pending,
@@ -179,50 +190,72 @@ def format_plan(plan):
             f"需获取或续取名单 {t.get('roster_days', 0)} 天；仅本地已知的首轮必要请求 {known}。\n"
             f"{format_budget(o['max_requests'], o['minutes'])}，每秒最多 {o['rate']:g} 次。\n"
             f"204 重试：{'是' if o['retry_empty'] else '否'}；重新核实名单：{'是' if o['refresh_roster'] else '否'}。\n"
-            f"{plan['execution']}\n{NOTICE}")
+            f"{plan['execution']}\n当前队列完成后如仍有 HTTP 204 / 异常名单，请用③复核缺口生成新计划。\n{NOTICE}")
 
 
-def export_audit(db_path, out_dir, movie, start, end):
+def export_audit(db_path, out_dir, movie, start, end, *, write_matrix=True):
+    """Generate daily audit and summary. Full matrix is optional for each batch.
+
+    The GUI's per-batch path does NOT rewrite millions of cinema-day CSV rows.
+    Explicit Export still generates a fresh complete matrix of known candidates.
+    """
     history.validate(movie, start, end, "roster")
     root = Path(out_dir) / f"{movie}_{start}_{end}"
     paths = {key: root.with_name(root.name + suffix) for key, suffix in (
         ("matrix", "_cinema_days.csv"), ("audit", "_daily_audit.csv"), ("summary", "_summary.json"))}
     totals = Counter()
     daily = []
-    with snapshot(db_path) as conn, history._report_file(paths["matrix"]) as temp:
+
+    def scan_days(conn, writer):
         refreshes = history_roster.stored_refreshes(conn)
-        with temp.open("w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(("date", "cinema_code", "cinema_name", "movie_code", "status", "status_zh",
-                             "sales_fen", "sales_yuan", "roster_sources", "national_complete"))
-            for day in daterange(start, end):
-                _, _, _, _, states, sources = history._day_plan(conn, movie, day, "national", ())
+        # Avoid reloading all cinema names once per day in long-date exports.
+        names = dict(conn.execute("SELECT cinema_code,cinema_name FROM dim_cinema")) if writer else {}
+        for day in daterange(start, end):
+            _, _, _, _, states, sources = history._day_plan(conn, movie, day, "national", ())
+            counts = Counter(states.values())
+            if writer:
                 values = {r[0]: r[1] for r in conn.execute(
                     "SELECT cinema_code,sales_fen FROM fact_cinema_movie WHERE date=? AND movie_code=?", (day, movie))}
-                names = dict(conn.execute("SELECT cinema_code,cinema_name FROM dim_cinema"))
-                counts = Counter(states.values())
                 for code, state in states.items():
-                    # Only a validated full slice can establish absence. Unknown is never zero.
+                    # Unknown, failed and HTTP 204 must remain blank, not zero.
                     cents = values.get(code) if state == "with_movie" else 0 if state == "without_movie" else None
                     yuan = None if cents is None else f"{cents // 100}.{cents % 100:02}"
                     writer.writerow((day, code, names.get(code), movie, state, LABELS[state], cents,
                                      yuan, "|".join(sources.get(code, ())), "false"))
-                observed = counts["with_movie"] + counts["without_movie"]
-                refresh = refreshes.get(day)
-                daily.append(dict(date=day, target_count=len(states), observed=observed,
-                                  **{s: counts[s] for s in history.DAY_STATES},
-                                  known_roster_observed=bool(states) and observed == len(states),
-                                  roster_status=refresh["status"] if refresh else "not_collected",
-                                  roster_rows=refresh["row_count"] if refresh else 0,
-                                  national_complete=False, national_roster_coverage="unverified"))
-                totals.update(counts)
+            refresh = refreshes.get(day)
+            roster_status = refresh["status"] if refresh else "not_collected"
+            assessment = quality.assess_day(counts, roster_status, len(states))
+            daily.append(dict(date=day, target_count=len(states),
+                              observed=assessment["known_verified"],
+                              **{s: counts[s] for s in history.DAY_STATES},
+                              known_roster_observed=assessment["known_scope_complete"],
+                              roster_status=roster_status,
+                              roster_rows=refresh["row_count"] if refresh else 0,
+                              national_roster_coverage="unverified",
+                              **assessment))
+            totals.update(counts)
+
+    with snapshot(db_path) as conn:
+        if write_matrix:
+            with history._report_file(paths["matrix"]) as temp:
+                with temp.open("w", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(("date", "cinema_code", "cinema_name", "movie_code", "status", "status_zh",
+                                     "sales_fen", "sales_yuan", "roster_sources", "national_complete"))
+                    scan_days(conn, writer)
+        else:
+            scan_days(conn, None)
+            paths.pop("matrix")  # Do not present an older full matrix as newly exported.
+
     with history._report_file(paths["audit"]) as temp:
         with temp.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(daily[0]))
             writer.writeheader()
             writer.writerows(daily)
+    followup = quality.summarize_days(daily)
     summary = dict(movie=movie, start=start, end=end, states=dict(totals), days=daily,
-                   national_complete=False, notice=NOTICE)
+                   followup=followup, followup_message=quality.followup_message(followup),
+                   matrix_rebuilt=bool(write_matrix), national_complete=False, notice=NOTICE)
     with history._report_file(paths["summary"]) as temp:
         temp.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return dict(paths=paths, summary=summary)
@@ -230,7 +263,7 @@ def export_audit(db_path, out_dir, movie, start, end):
 
 def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progress=lambda *args: None,
              on_coverage=lambda coverage: None,
-             client_factory=Client):
+             client_factory=Client, full_matrix=True):
     # Recompute before constructing a client: altered inputs or changed cache require a new review.
     current = make_plan(plan["database"], plan["movie"], plan["start"], plan["end"], **plan["options"])
     if current != plan:
@@ -249,7 +282,8 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
         progress("核实逐日影院名单", client.stats.requests)
 
     roster = history._refresh_roster(db_path, plan["start"], plan["end"], client, guard,
-                                     o["refresh_roster"], roster_log)
+                                     o["refresh_roster"], roster_log, only_abnormal=o["review_only"],
+                                     exclude_days=o["reviewed_roster_days"])
     # Discovering new IDs changes the denominator; never use the per-batch HTTP
     # allowance as the total work. Reuse the validated plan if no roster was read.
     baseline = (make_plan(db_path, plan["movie"], plan["start"], plan["end"], **o)
@@ -266,7 +300,7 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
         detail = history._repair(db_path, plan["movie"], plan["start"], plan["end"], "national", (),
                                  client, guard, o["retry_empty"], False, emit,
                                  on_progress=detail_progress,
-                                 defer_empty_streak=bool(o["max_requests"] or o["minutes"]))
+                                 defer_empty_streak=bool(o["max_requests"] or o["minutes"]) and not o["retry_empty"])
     failed = bool(roster.get("failed") or detail.get("failed") or detail.get("errors"))
     reason = roster.get("stopped") or detail.get("stopped")
     if reason is None and stopped():
@@ -276,9 +310,15 @@ def run_plan(plan, raw_dir, out_dir, *, stopped=lambda: False, emit=print, progr
                   failed=failed, paused=reason == history.USER_STOPPED,
                   reason=reason or "本批处理结束",
                   national_complete=False)
+    result["reviewed_roster_days"] = sorted(set(o["reviewed_roster_days"]) | set(roster["completed_dates"]))
     on_coverage(dict(baseline, cached=baseline.get("cached", 0) + result["saved"]))
     progress("生成逐日审计及 CSV", client.stats.requests)
-    result["reports"] = export_audit(db_path, out_dir, plan["movie"], plan["start"], plan["end"])
+    result["reports"] = export_audit(db_path, out_dir, plan["movie"], plan["start"], plan["end"],
+                                     write_matrix=full_matrix)
+    followup = result["reports"]["summary"]["followup"]
+    result["needs_review"] = bool(followup["known_unresolved"] or followup["roster_problem_days"])
+    if result["reason"] == "本批处理结束" and result["needs_review"]:
+        result["reason"] = "本批候选队列已处理，仍有待复核的影院日或名单异常"
     on_coverage(coverage_from_summary(result["reports"]["summary"]))
     manifest = Path(out_dir) / f"batch_{plan['id'][:16]}_{uuid4().hex[:8]}.json"
     with history._report_file(manifest) as temp:

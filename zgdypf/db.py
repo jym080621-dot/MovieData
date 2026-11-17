@@ -154,6 +154,17 @@ CREATE TABLE IF NOT EXISTS collect_ledger (
     PRIMARY KEY (job, key)
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_status ON collect_ledger(job, status);
+-- Index legacy CLI task keys by date suffix for large historical batches.
+CREATE INDEX IF NOT EXISTS idx_ledger_job_day_suffix ON collect_ledger(job, substr(key,-10));
+-- Durable attempt order (including success/failure), retaining the v1.5.1 handoff table name.
+CREATE TABLE IF NOT EXISTS history_204_review_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    cinema_code TEXT NOT NULL,
+    attempted_at TEXT NOT NULL,
+    UNIQUE(date,cinema_code)
+);
+CREATE INDEX IF NOT EXISTS idx_history_204_review_day_id ON history_204_review_queue(date,id);
 
 CREATE TABLE IF NOT EXISTS history_cinema_roster (
     date TEXT NOT NULL,

@@ -237,6 +237,46 @@ class NationalGuiTests(unittest.TestCase):
         self.assertEqual(self.page.progress.completed, 2)
         self.assertEqual(len(set(fake.calls)), 2)
 
+    def test_review_button_plans_offline_and_resumes_remaining_roster_dates(self):
+        fake = fixtures.MovieHistoryTests()
+        fake.setUp()
+        self.addCleanup(fake.doCleanups)
+        self.page.db_path = fake.path
+        self.page.end.set('2026-05-01')
+        self.page.cap.set('1')
+        with fake.conn:
+            for day in (fixtures.DAY, '2026-05-01'):
+                history_roster._merge(fake.conn, day, {fixtures.CODES[0]: '测试'}, 'csv:test')
+                history_roster._save_refresh(fake.conn, day, 'seed', 'thin', 1, 1, 1)
+        fake.routes = [(200, {'salesRankList': [], 'hasMore': False})] * 2
+        original_run = national_history.run_plan
+        def run(*args, **kwargs):
+            return original_run(*args, client_factory=fake.client, **kwargs)
+        with patch.object(national_history, 'run_plan', side_effect=run):
+            with patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('network during preview')):
+                self.page.review_button.invoke()
+                self.wait()
+            self.assertEqual(fake.calls, [])
+            self.assertTrue(self.page.plan['options']['review_only'])
+            self.page.run_button.invoke()
+            self.wait()
+            self.assertIsNotNone(self.page.plan, self.page.status.get())
+            self.assertEqual(self.page.plan['options']['reviewed_roster_days'], [fixtures.DAY])
+            self.page.run_button.invoke()
+            self.wait()
+        self.assertEqual(len(fake.calls), 2)
+        self.assertIn('2026-05-01', fake.calls[1])
+        self.assertFalse(list((self.root/'out').glob('*_cinema_days.csv')))
+
+    def test_review_button_visible_in_supported_window(self):
+        self.page.geometry('1100x780+20+20')
+        self.app.update()
+        button = self.page.review_button
+        self.assertTrue(button.winfo_ismapped())
+        self.assertEqual(button.winfo_width(), button.winfo_reqwidth())
+        self.assertLessEqual(button.winfo_rootx()+button.winfo_width(),
+                             self.page.winfo_rootx()+self.page.winfo_width())
+
 
 if __name__ == "__main__":
     unittest.main()

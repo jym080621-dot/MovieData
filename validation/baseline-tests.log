@@ -1,0 +1,199 @@
+test_bad_payload_and_204_preserve_existing (test_movie_history.MovieHistoryTests.test_bad_payload_and_204_preserve_existing) ... ok
+test_budget_and_resume_across_jobs_and_movies (test_movie_history.MovieHistoryTests.test_budget_and_resume_across_jobs_and_movies) ... ok
+test_cancel_before_any_request (test_movie_history.MovieHistoryTests.test_cancel_before_any_request) ... ok
+test_existing_desktop_engine_resumes_cli_success (test_movie_history.MovieHistoryTests.test_existing_desktop_engine_resumes_cli_success) ... ok
+test_explicit_calls_cinema_with_thin_probe_cached_and_one_request (test_movie_history.MovieHistoryTests.test_explicit_calls_cinema_with_thin_probe_cached_and_one_request) ... ok
+test_guarded_client_keeps_tls_certificate_and_hostname_validation (test_movie_history.MovieHistoryTests.test_guarded_client_keeps_tls_certificate_and_hostname_validation) ... ok
+test_invalid_roster_csv_has_no_partial_writes (test_movie_history.MovieHistoryTests.test_invalid_roster_csv_has_no_partial_writes) ... ok
+test_ledger_aliases_inconsistent_row_and_csv (test_movie_history.MovieHistoryTests.test_ledger_aliases_inconsistent_row_and_csv) ... ok
+test_limit_and_redirect_stop_immediately (test_movie_history.MovieHistoryTests.test_limit_and_redirect_stop_immediately) ... ok
+test_missing_tls_key_log_directory_does_not_break_film_search (test_movie_history.MovieHistoryTests.test_missing_tls_key_log_directory_does_not_break_film_search) ... ok
+test_quick_batch_cancel_still_exports (test_movie_history.MovieHistoryTests.test_quick_batch_cancel_still_exports) ... ok
+test_quick_batch_shares_budget_exports_and_resumes (test_movie_history.MovieHistoryTests.test_quick_batch_shares_budget_exports_and_resumes) ... ok
+test_quick_batch_stops_followup_requests_when_roster_access_denied (test_movie_history.MovieHistoryTests.test_quick_batch_stops_followup_requests_when_roster_access_denied) ... ok
+test_quick_batch_time_limit_saves_progress_and_does_not_reissue_saved_calls (test_movie_history.MovieHistoryTests.test_quick_batch_time_limit_saves_progress_and_does_not_reissue_saved_calls) ... ok
+test_quick_film_search_deduplicates_title_and_keeps_code (test_movie_history.MovieHistoryTests.test_quick_film_search_deduplicates_title_and_keeps_code) ... ok
+test_request_cap_counts_retries_and_probe (test_movie_history.MovieHistoryTests.test_request_cap_counts_retries_and_probe) ... ok
+test_roster_refresh_flags_repeated_page (test_movie_history.MovieHistoryTests.test_roster_refresh_flags_repeated_page) ... ok
+test_roster_refresh_resumes_pagination_and_retains_old_rows (test_movie_history.MovieHistoryTests.test_roster_refresh_resumes_pagination_and_retains_old_rows) ... ok
+test_roster_repair_prioritizes_current_snapshot_without_dropping_old_cinemas (test_movie_history.MovieHistoryTests.test_roster_repair_prioritizes_current_snapshot_without_dropping_old_cinemas) ... ok
+test_thin_day_cache (test_movie_history.MovieHistoryTests.test_thin_day_cache) ... ok
+test_thin_local_rank_blocks_wide_collection (test_movie_history.MovieHistoryTests.test_thin_local_rank_blocks_wide_collection) ... ok
+test_thin_roster_merges_sources_and_queues_new_cinemas (test_movie_history.MovieHistoryTests.test_thin_roster_merges_sources_and_queues_new_cinemas) ... ok
+test_unverified_204_and_reprobe (test_movie_history.MovieHistoryTests.test_unverified_204_and_reprobe) ... ok
+test_write_failure_rolls_back_entire_slice (test_movie_history.MovieHistoryTests.test_write_failure_rolls_back_entire_slice) ... ok
+test_main_window_has_one_history_entry (test_national_gui.NationalGuiTests.test_main_window_has_one_history_entry) ... ERROR
+test_offline_plan_parameter_invalidation_and_export (test_national_gui.NationalGuiTests.test_offline_plan_parameter_invalidation_and_export) ... ERROR
+test_original_24_datasets_and_independent_page (test_national_gui.NationalGuiTests.test_original_24_datasets_and_independent_page) ... ERROR
+test_real_button_flow_run_and_resume_with_fake_http (test_national_gui.NationalGuiTests.test_real_button_flow_run_and_resume_with_fake_http) ... ERROR
+test_request_counter_does_not_overwrite_coverage (test_national_gui.NationalGuiTests.test_request_counter_does_not_overwrite_coverage) ... ERROR
+test_resume_progress_restores_cached_cinema_days (test_national_gui.NationalGuiTests.test_resume_progress_restores_cached_cinema_days) ... ERROR
+test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent (test_national_gui.NationalGuiTests.test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent) ... ERROR
+test_small_window_keeps_results_button_fully_visible (test_national_gui.NationalGuiTests.test_small_window_keeps_results_button_fully_visible) ... ERROR
+test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan (test_national_gui.NationalGuiTests.test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan) ... ERROR
+test_validation_error_recovers_controls (test_national_gui.NationalGuiTests.test_validation_error_recovers_controls) ... ERROR
+test_access_denial_does_not_continue_or_claim_complete (test_national_history.NationalHistoryTests.test_access_denial_does_not_continue_or_claim_complete) ... ok
+test_all_known_cinemas_across_dates_included_without_sampling (test_national_history.NationalHistoryTests.test_all_known_cinemas_across_dates_included_without_sampling) ... ok
+test_batches_resume_and_cross_movie_cache (test_national_history.NationalHistoryTests.test_batches_resume_and_cross_movie_cache) ... ok
+test_budget_includes_retry_and_roster_pagination (test_national_history.NationalHistoryTests.test_budget_includes_retry_and_roster_pagination) ... ok
+test_cancel_before_start_still_exports_no_requests (test_national_history.NationalHistoryTests.test_cancel_before_start_still_exports_no_requests) ... ok
+test_changed_input_or_database_invalidates_review (test_national_history.NationalHistoryTests.test_changed_input_or_database_invalidates_review) ... ok
+test_coverage_callback_includes_saved_work_and_new_roster (test_national_history.NationalHistoryTests.test_coverage_callback_includes_saved_work_and_new_roster) ... ok
+test_detail_access_denial_is_error_not_missing (test_national_history.NationalHistoryTests.test_detail_access_denial_is_error_not_missing) ... ok
+test_empty_cache_estimates_full_range_and_scales_with_rate (test_national_history.NationalHistoryTests.test_empty_cache_estimates_full_range_and_scales_with_rate) ... ok
+test_empty_finished_roster_keeps_national_projection_but_has_no_queue (test_national_history.NationalHistoryTests.test_empty_finished_roster_keeps_national_projection_but_has_no_queue) ... ok
+test_errors_missing_and_inconsistent_are_blank_in_export (test_national_history.NationalHistoryTests.test_errors_missing_and_inconsistent_are_blank_in_export) ... ok
+test_estimate_counts_only_remaining_roster_pages_after_resume (test_national_history.NationalHistoryTests.test_estimate_counts_only_remaining_roster_pages_after_resume) ... ok
+test_estimate_uses_current_queue_and_rechecks_only_when_selected (test_national_history.NationalHistoryTests.test_estimate_uses_current_queue_and_rechecks_only_when_selected) ... ok
+test_invalid_inputs_fail_before_network (test_national_history.NationalHistoryTests.test_invalid_inputs_fail_before_network) ... ok
+test_pause_after_response_persists_and_resumes (test_national_history.NationalHistoryTests.test_pause_after_response_persists_and_resumes) ... ok
+test_pause_during_retry_wait_leaves_delay_interruptible (test_national_history.NationalHistoryTests.test_pause_during_retry_wait_leaves_delay_interruptible) ... ok
+test_plan_and_reports_serializable_and_reviewable (test_national_history.NationalHistoryTests.test_plan_and_reports_serializable_and_reviewable) ... ok
+test_preview_has_no_network_or_database_writes (test_national_history.NationalHistoryTests.test_preview_has_no_network_or_database_writes) ... ok
+test_statuses_and_money_do_not_conflate_unknown_with_zero (test_national_history.NationalHistoryTests.test_statuses_and_money_do_not_conflate_unknown_with_zero) ... ok
+test_unlimited_run_continues_past_empty_streak_and_saves_audit (test_national_history.NationalHistoryTests.test_unlimited_run_continues_past_empty_streak_and_saves_audit) ... ok
+
+======================================================================
+ERROR: test_main_window_has_one_history_entry (test_national_gui.NationalGuiTests.test_main_window_has_one_history_entry)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_offline_plan_parameter_invalidation_and_export (test_national_gui.NationalGuiTests.test_offline_plan_parameter_invalidation_and_export)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_original_24_datasets_and_independent_page (test_national_gui.NationalGuiTests.test_original_24_datasets_and_independent_page)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_real_button_flow_run_and_resume_with_fake_http (test_national_gui.NationalGuiTests.test_real_button_flow_run_and_resume_with_fake_http)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_request_counter_does_not_overwrite_coverage (test_national_gui.NationalGuiTests.test_request_counter_does_not_overwrite_coverage)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_resume_progress_restores_cached_cinema_days (test_national_gui.NationalGuiTests.test_resume_progress_restores_cached_cinema_days)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent (test_national_gui.NationalGuiTests.test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_small_window_keeps_results_button_fully_visible (test_national_gui.NationalGuiTests.test_small_window_keeps_results_button_fully_visible)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan (test_national_gui.NationalGuiTests.test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+======================================================================
+ERROR: test_validation_error_recovers_controls (test_national_gui.NationalGuiTests.test_validation_error_recovers_controls)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData/tests/test_national_gui.py", line 21, in setUp
+    self.app = gui.App()
+               ^^^^^^^^^
+  File "/workspace/MovieData/gui.py", line 50, in __init__
+    super().__init__()
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/tkinter/__init__.py", line 2346, in __init__
+    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: no display name and no $DISPLAY environment variable
+
+----------------------------------------------------------------------
+Ran 54 tests in 0.894s
+
+FAILED (errors=10)

@@ -1,0 +1,13 @@
+test_204_ledger_and_rotation_rollback_together (test_v151_integration.IntegrationTests.test_204_ledger_and_rotation_rollback_together) ... ok
+test_changed_rotation_invalidates_reviewed_plan (test_v151_integration.IntegrationTests.test_changed_rotation_invalidates_reviewed_plan) ... ok
+test_failed_first_cinema_does_not_starve_remaining_204s (test_v151_integration.IntegrationTests.test_failed_first_cinema_does_not_starve_remaining_204s) ... ok
+test_light_audit_preserves_existing_matrix_and_exact_money (test_v151_integration.IntegrationTests.test_light_audit_preserves_existing_matrix_and_exact_money) ... ok
+test_mixed_success_day_yields_next_batch_to_other_date (test_v151_integration.IntegrationTests.test_mixed_success_day_yields_next_batch_to_other_date) ... ok
+test_persistent_rotation_survives_database_close_and_reopen (test_v151_integration.IntegrationTests.test_persistent_rotation_survives_database_close_and_reopen) ... ok
+test_real_responses_replay_through_collection_and_export (test_v151_integration.IntegrationTests.test_real_responses_replay_through_collection_and_export) ... ok
+test_roster_review_resumes_other_thin_dates_without_repeating_first (test_v151_integration.IntegrationTests.test_roster_review_resumes_other_thin_dates_without_repeating_first) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.367s
+
+OK

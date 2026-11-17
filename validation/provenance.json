@@ -1,0 +1,15 @@
+{
+  "base_repository": "jym080621-dot/MovieData",
+  "base_tag": "v1.5.0",
+  "base_commit": "8ac9235be6a15952207cb6b064b16dda5791751f",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "handoff_sha256sums_all_match": true,
+  "real_requests": 8,
+  "http_statuses": {
+    "200": 7,
+    "204": 1
+  },
+  "national_complete": false,
+  "national_roster_coverage": "unverified"
+}

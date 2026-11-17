@@ -1,6 +1,6 @@
 # MovieData
 
-MovieData 是一个桌面电影票房采集工具。它从中国电影票房网站 `zgdypf.zgdypw.cn` 读取大盘、榜单、影片、影院和院线数据，保存到本地 SQLite，并导出 CSV 和 JSON。本说明适用于 **v1.5.0**。
+MovieData 是一个桌面电影票房采集工具。它从中国电影票房网站 `zgdypf.zgdypw.cn` 读取大盘、榜单、影片、影院和院线数据，保存到本地 SQLite，并导出 CSV 和 JSON。本说明适用于 **v1.5.1**。
 
 ## 选择采集方式
 
@@ -53,3 +53,11 @@ python -m unittest discover -s tests -v
 测试使用离线响应，界面测试需要可用的桌面环境。`contract_test.py` 用于验证源站接口，会发出真实网络请求。Windows 打包需安装 PyInstaller，在源码目录运行 `python build_release.py --build`，产物写入 `dist/`。
 
 源码包内的 `CONTRACT.md` 记录接口与字段实测，`单片历史影院使用说明.md` 说明命令行补采与审计，`CHANGELOG.md` 记录版本变更。项目使用 MIT 许可证，见 `LICENSE`。
+
+> v1.5.1：分批自动生成审计 CSV + JSON，不再每批重写整个影院日矩阵；需要完整明细请在全国历史页面点击『导出当前 CSV / 审计』。③复核缺口会创建新计划，须再次审查后启动。全国范围完整性仍未证实。
+
+
+v1.5.1 集成验收结果见 [VALIDATION_v1.5.1.md](VALIDATION_v1.5.1.md)。源码支持 `python build_release.py --source-only`。本包包含少量联网验证证据，不包含采集数据库。Windows 程序须在 Windows 上用 `python build_release.py --build` 重新构建；本次只交付源码。程序重启后重新生成离线计划可恢复数据库断点；异常名单复核批次的续跑计划包含已复核日期，保存在结果目录的 `plan_*.json` 中。
+
+本次集成验收与限制见 [VALIDATION_v1.5.1.md](VALIDATION_v1.5.1.md)。源码包保留 8 次受控请求的轻量验证证据，不包含采集数据库或全国采集结果。
+仅打包源码（Linux / Windows）：`python build_release.py --source-only`；Windows 新 EXE 仍须在 Windows 运行 `python build_release.py --build`。

@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from . import db, history_roster
-from .cinema_detail import CLI_JOB, GUI_JOB, RANK_EVIDENCE, collect, reusable_slices
+from .cinema_detail import CLI_JOB, GUI_JOB, RANK_EVIDENCE, collect, reusable_slices, note_attempt
 from .client import AccessLimited, BadPayload, Client, HardError, RetryExhausted
 from .common import MIN_CINEMAS, daterange
 from .export import write_csv
@@ -98,9 +98,9 @@ def _day_plan(conn, movie, day, scope, codes):
     ledger = {}
     for row in conn.execute(
         """SELECT job,key,status,http_status FROM collect_ledger
-           WHERE (job=? AND key LIKE ?) OR (job=? AND key>=? AND key<?)
+           WHERE (job=? AND substr(key,-10)=?) OR (job=? AND key>=? AND key<?)
            ORDER BY checked_at DESC, (status='empty') ASC""",
-        (CLI_JOB, "%|" + day, GUI_JOB, day + "|", day + "}"),
+        (CLI_JOB, day, GUI_JOB, day + "|", day + "}"),
     ):
         first, sep, last = row["key"].partition("|")
         if sep and (row["job"] == CLI_JOB and last == day or row["job"] == GUI_JOB and first == day):
@@ -335,25 +335,33 @@ def refresh_roster(db_path, raw_dir, start, end, *, max_requests=20, rate=1.0, m
     return _refresh_roster(db_path, start, end, client, guard, refresh_again, emit)
 
 
-def _refresh_roster(db_path, start, end, client, guard, refresh_again, emit):
+def _refresh_roster(db_path, start, end, client, guard, refresh_again, emit, *, only_abnormal=False,
+                    exclude_days=()):
     totals = Counter()
+    completed_dates = []
     with closing(db.connect(str(db_path))) as conn:
         previous = history_roster.stored_refreshes(conn)
         try:
             for day in daterange(start, end):
+                if day in exclude_days:
+                    totals["skipped_days"] += 1
+                    continue
                 record = previous.get(day)
-                if record and record["status"] != "fetching" and not refresh_again:
+                if (record and record["status"] != "fetching"
+                        and (not refresh_again or only_abnormal and record["status"] == "listed")):
                     totals["skipped_days"] += 1
                     continue
                 guard()
                 totals["new_candidates"] += history_roster.refresh_day(conn, client, day, record, emit)
                 totals["updated_days"] += 1
+                completed_dates.append(day)
         except (BatchEnded, HardError, RetryExhausted, BadPayload) as exc:
             emit(f"名单更新停止 · {exc}")
             totals["stopped"] = str(exc)
             if not isinstance(exc, BatchEnded):
                 totals["failed"] = 1
-    return {**totals, "requests": client.stats.requests, "retries": client.stats.retries}
+    return {**totals, "requests": client.stats.requests, "retries": client.stats.retries,
+            "completed_dates": completed_dates}
 
 
 def _probe(conn, client, day):
@@ -397,16 +405,33 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
     totals = Counter()
     with closing(db.connect(str(db_path))) as conn:
         try:
-            for day in daterange(start, end):
+            ordered_days = list(daterange(start, end))
+            if scope == "national" and retry_empty:
+                latest = {r["date"]: r["last_id"] for r in conn.execute(
+                    "SELECT date, MAX(id) AS last_id FROM history_204_review_queue "
+                    "WHERE date>=? AND date<=? GROUP BY date", (start, end))}
+                # A date that has not yet consumed 204 review quota comes first.
+                ordered_days.sort(key=lambda day: (latest.get(day, -1), day))
+            for day in ordered_days:
                 _, probe, _, usable_rank, states, _ = _day_plan(conn, movie, day, scope, codes)
                 codes_to_fetch = _pending(states, retry_empty)
                 if not codes_to_fetch or scope == "ranklist" and not usable_rank:
                     continue
                 if scope in ("roster", "national"):
                     current = history_roster.latest_site_codes(conn, day)
-                    codes_to_fetch.sort(key=lambda code: (
-                        states[code] in ("deferred_204", "empty_204"), code not in current,
-                    ))
+                    if scope == "national" and retry_empty:
+                        # The earliest *last* 204 response goes first. Previously
+                        # rechecked cinemas move to the end of the queue, even
+                        # if every response is 204 and batches are very small.
+                        order = {r["cinema_code"]: r["id"] for r in conn.execute(
+                            "SELECT cinema_code,id FROM history_204_review_queue WHERE date=?", (day,))}
+                        codes_to_fetch.sort(key=lambda code: (
+                            order.get(code, -1),
+                            states[code] in ("deferred_204", "empty_204"), code not in current, code))
+                    else:
+                        codes_to_fetch.sort(key=lambda code: (
+                            states[code] in ("deferred_204", "empty_204"), code not in current,
+                        ))
                 if scope not in ("explicit", "roster", "national"):
                     if not recheck_days and _recent_unavailable(probe):
                         totals["skipped_days"] += 1
@@ -428,11 +453,19 @@ def _repair(db_path, movie, start, end, scope, codes, client, guard, retry_empty
                     if on_progress:
                         on_progress(day, totals)
                     guard()
+                    before_requests = client.stats.requests
                     try:
-                        result, count = collect(conn, client, code, day)
-                    except (BadPayload, HardError, RetryExhausted) as exc:
-                        with conn:
-                            db.ledger_put(conn, CLI_JOB, f"{code}|{day}", "error", err=str(exc)[:300])
+                        result, count = collect(conn, client, code, day, record_attempt=scope == "national")
+                    except (BadPayload, HardError, RetryExhausted, BatchEnded) as exc:
+                        # A pause before sending anything leaves the task untouched.
+                        # A budget exhausted between retries must retain the failed attempt.
+                        if client.stats.requests > before_requests:
+                            with conn:
+                                db.ledger_put(conn, CLI_JOB, f"{code}|{day}", "error", err=str(exc)[:300])
+                                if scope == "national":
+                                    note_attempt(conn, code, day)
+                        if isinstance(exc, BatchEnded):
+                            raise
                         totals["errors"] += 1
                         if isinstance(exc, AccessLimited):
                             raise

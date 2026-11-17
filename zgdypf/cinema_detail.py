@@ -35,7 +35,18 @@ def defer_empty(conn, code: str, day: str) -> bool:
     return row is not None and row[0] in ("empty", "empty_unverified")
 
 
-def collect(conn, client: Client, code: str, day: str, job: str = CLI_JOB) -> tuple[str, int]:
+def note_attempt(conn, code, day):
+    """Move an attempted cinema-day to the durable queue tail, within the caller's transaction.
+
+    The legacy table name is retained for databases made by the handoff patch.
+    Successes and failures also consume quota and must participate in rotation.
+    """
+    conn.execute("DELETE FROM history_204_review_queue WHERE date=? AND cinema_code=?", (day, code))
+    conn.execute("INSERT INTO history_204_review_queue(date,cinema_code,attempted_at) VALUES(?,?,?)",
+                 (day, code, db.now()))
+
+
+def collect(conn, client: Client, code: str, day: str, job: str = CLI_JOB, *, record_attempt=False) -> tuple[str, int]:
     """调用一次分片端点，校验全片目，再原子替换该影院日分片与台账。"""
     response = api.cinema_box_response(client, code, day)
     key = f"{code}|{day}" if job == CLI_JOB else f"{day}|{code}"
@@ -53,6 +64,8 @@ def collect(conn, client: Client, code: str, day: str, job: str = CLI_JOB) -> tu
             if has_facts or has_day:
                 raise BadPayload(f"{code}|{day} 返回 204，和已有分片冲突")
             db.ledger_put(conn, job, key, "empty_unverified", 204, response.attempts, response.elapsed_ms)
+            if record_attempt:
+                note_attempt(conn, code, day)
         return "empty", 0
 
     box = response.data
@@ -105,6 +118,8 @@ def collect(conn, client: Client, code: str, day: str, job: str = CLI_JOB) -> tu
             movie_count=count, new_movie_count=box.get("newMovieCount"),
         ))
         db.ledger_put(conn, job, key, "ok", 200, response.attempts, response.elapsed_ms)
+        if record_attempt:
+            note_attempt(conn, code, day)
     return "ok", count
 
 

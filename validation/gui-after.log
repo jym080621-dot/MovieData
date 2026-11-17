@@ -1,0 +1,17 @@
+test_main_window_has_one_history_entry (test_national_gui.NationalGuiTests.test_main_window_has_one_history_entry) ... ok
+test_offline_plan_parameter_invalidation_and_export (test_national_gui.NationalGuiTests.test_offline_plan_parameter_invalidation_and_export) ... ok
+test_original_24_datasets_and_independent_page (test_national_gui.NationalGuiTests.test_original_24_datasets_and_independent_page) ... ok
+test_real_button_flow_run_and_resume_with_fake_http (test_national_gui.NationalGuiTests.test_real_button_flow_run_and_resume_with_fake_http) ... ok
+test_request_counter_does_not_overwrite_coverage (test_national_gui.NationalGuiTests.test_request_counter_does_not_overwrite_coverage) ... ok
+test_resume_progress_restores_cached_cinema_days (test_national_gui.NationalGuiTests.test_resume_progress_restores_cached_cinema_days) ... ok
+test_review_button_plans_offline_and_resumes_remaining_roster_dates (test_national_gui.NationalGuiTests.test_review_button_plans_offline_and_resumes_remaining_roster_dates) ... ok
+test_review_button_visible_in_supported_window (test_national_gui.NationalGuiTests.test_review_button_visible_in_supported_window) ... ok
+test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent (test_national_gui.NationalGuiTests.test_small_fraction_draws_a_visible_blue_segment_and_keeps_exact_percent) ... ok
+test_small_window_keeps_results_button_fully_visible (test_national_gui.NationalGuiTests.test_small_window_keeps_results_button_fully_visible) ... ok
+test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan (test_national_gui.NationalGuiTests.test_unlimited_shortcut_pauses_inflight_request_and_resumes_from_saved_plan) ... ok
+test_validation_error_recovers_controls (test_national_gui.NationalGuiTests.test_validation_error_recovers_controls) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 5.404s
+
+OK

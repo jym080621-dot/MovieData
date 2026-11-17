@@ -134,11 +134,13 @@ class NationalHistoryPage(tk.Toplevel):
         self.preview_button.pack(side="left")
         self.run_button = ttk.Button(actions, text="② 按计划启动 / 继续采集", command=self.run, style="Accent.TButton", state="disabled")
         self.run_button.pack(side="left", padx=8)
+        self.review_button = ttk.Button(actions, text="③ 复核缺口", command=self.review)
+        self.review_button.pack(side="left", padx=(0, 8))
         self.stop_button = ttk.Button(actions, text="暂停并保存断点", command=self.stop, style="Stop.TButton", state="disabled")
         self.stop_button.pack(side="left")
         self.export_button = ttk.Button(actions, text="导出当前 CSV / 审计", command=self.export)
         self.export_button.pack(side="right")
-        self.controls.extend((self.preview_button, self.export_button))
+        self.controls.extend((self.preview_button, self.review_button, self.export_button))
         self.tabs = ttk.Notebook(body)
         self.tabs.pack(fill="both", expand=True)
         overview = ttk.Frame(self.tabs, padding=10)
@@ -241,9 +243,11 @@ class NationalHistoryPage(tk.Toplevel):
 
     def options(self):
         return dict(max_requests=int(self.cap.get()), minutes=float(self.minutes.get()), rate=float(self.rate.get()),
-                    retry_empty=self.retry_empty.get(), refresh_roster=self.refresh.get())
+                    retry_empty=self.retry_empty.get(), refresh_roster=self.refresh.get(),
+                    review_only=getattr(self, "review_only", False))
 
-    def preview(self):
+    def preview(self, review_mode=False):
+        self.review_only = bool(review_mode)
         try:
             args, options = self.selection(), self.options()
         except ValueError:
@@ -254,6 +258,18 @@ class NationalHistoryPage(tk.Toplevel):
             national.save_plan(plan, self.out_dir)
             return plan
         self.begin("plan", work)
+
+    def review(self):
+        """One-click, explicit *planning* of 204 and questionable roster rechecks.
+
+        This does not start any network requests. The operator must approve the
+        newly generated plan, preserving a guard against endless 204 retries.
+        """
+        if self.busy or self.app._running:
+            return
+        self.retry_empty.set(True)
+        self.refresh.set(True)
+        self.preview(review_mode=True)
 
     def unlimited(self):
         if self.busy or self.app._running:
@@ -286,10 +302,16 @@ class NationalHistoryPage(tk.Toplevel):
                 emit=lambda msg: self.events.put(("log", msg)),
                 progress=lambda text, count: self.events.put(("progress", text, count)),
                 on_coverage=lambda totals: self.events.put(("coverage", totals)),
+                full_matrix=False,  # Per-batch audit only; explicit Export writes full matrix.
             )
-            if result["paused"]:
+            if result["paused"] or (approved["options"].get("review_only") and
+                    result["reason"] in ("到达请求上限", "到达时间预算")):
                 try:
-                    opts = dict(approved["options"], refresh_roster=False)
+                    opts = dict(approved["options"])
+                    if opts.get("review_only"):
+                        opts["reviewed_roster_days"] = result["reviewed_roster_days"]
+                    else:
+                        opts.update(refresh_roster=False, review_only=False, reviewed_roster_days=[])
                     resume = national.make_plan(self.db_path, approved["movie"], approved["start"], approved["end"], **opts)
                     national.save_plan(resume, self.out_dir)
                     result["resume_plan"] = resume
@@ -398,8 +420,13 @@ class NationalHistoryPage(tk.Toplevel):
             reason = "已暂停，断点已保存" if result["paused"] else result["reason"]
             self.batch_text.set(f"{self.request_count_text(result['requests'])} · {reason}")
             next_plan = result.get("resume_plan")
-            next_step = "已准备续跑计划，审查后可继续。" if next_plan else "继续时请重新生成计划。"
-            self.status.set(f"{'本批有异常 · ' if result['failed'] else ''}{reason} · 核查 {result['saved']:,} 个影院日 · CSV 已导出。{next_step}")
+            if next_plan:
+                next_step = "已准备续跑计划，审查后可继续。"
+            elif result.get("needs_review"):
+                next_step = "存在未闭环的 204 / 失败 / 名单问题，请点③复核缺口生成新计划。"
+            else:
+                next_step = "如需完整影院日矩阵，请点「导出当前 CSV / 审计」。"
+            self.status.set(f"{'本批有异常 · ' if result['failed'] else ''}{reason} · 核查 {result['saved']:,} 个影院日 · 审计 CSV 已导出。{next_step}")
             self._write(self.logs, self.status.get(), True)
             if next_plan:
                 self.display_plan(next_plan)

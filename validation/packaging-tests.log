@@ -1,0 +1,9 @@
+test_source_archive_has_tests_fixtures_and_no_runtime_data (test_release.ReleaseTests.test_source_archive_has_tests_fixtures_and_no_runtime_data) ...   ✓ MovieData_v1.5.1_source.zip  0.5 MB
+ok
+test_source_only_does_not_build_windows_executable (test_release.ReleaseTests.test_source_only_does_not_build_windows_executable) ...   ✓ MovieData_v1.5.1_source.zip  0.5 MB
+ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.083s
+
+OK

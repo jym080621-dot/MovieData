@@ -1,0 +1,11 @@
+usage: pipeline.py [-h] [--rate RATE]
+                   {init,day,verify,sample,box,movie,qa,export,movie-history}
+                   ...
+
+positional arguments:
+  {init,day,verify,sample,box,movie,qa,export,movie-history}
+    movie-history       单片影院明细导出、审计与补采
+
+options:
+  -h, --help            show this help message and exit
+  --rate RATE

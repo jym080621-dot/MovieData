@@ -1,0 +1,29 @@
+test_chain_box (test_datasets_compatibility.DatasetCompatibilityTests.test_chain_box) ... ok
+test_chain_list (test_datasets_compatibility.DatasetCompatibilityTests.test_chain_list) ... ok
+test_chain_manage (test_datasets_compatibility.DatasetCompatibilityTests.test_chain_manage) ... ok
+test_chain_sum (test_datasets_compatibility.DatasetCompatibilityTests.test_chain_sum) ... ok
+test_chain_yesterday (test_datasets_compatibility.DatasetCompatibilityTests.test_chain_yesterday) ... ok
+test_cinema_box (test_datasets_compatibility.DatasetCompatibilityTests.test_cinema_box) ... ok
+test_cinema_list (test_datasets_compatibility.DatasetCompatibilityTests.test_cinema_list) ... ok
+test_cinema_manage (test_datasets_compatibility.DatasetCompatibilityTests.test_cinema_manage) ... ok
+test_cinema_sum (test_datasets_compatibility.DatasetCompatibilityTests.test_cinema_sum) ... ok
+test_city_data (test_datasets_compatibility.DatasetCompatibilityTests.test_city_data) ... ok
+test_date_range (test_datasets_compatibility.DatasetCompatibilityTests.test_date_range) ... ok
+test_day_data (test_datasets_compatibility.DatasetCompatibilityTests.test_day_data) ... ok
+test_movie_detail (test_datasets_compatibility.DatasetCompatibilityTests.test_movie_detail) ... ok
+test_nation_day (test_datasets_compatibility.DatasetCompatibilityTests.test_nation_day) ... ok
+test_nation_month (test_datasets_compatibility.DatasetCompatibilityTests.test_nation_month) ... ok
+test_nation_week (test_datasets_compatibility.DatasetCompatibilityTests.test_nation_week) ... ok
+test_national (test_datasets_compatibility.DatasetCompatibilityTests.test_national) ... ok
+test_period (test_datasets_compatibility.DatasetCompatibilityTests.test_period) ... ok
+test_province_list (test_datasets_compatibility.DatasetCompatibilityTests.test_province_list) ... ok
+test_release_day (test_datasets_compatibility.DatasetCompatibilityTests.test_release_day) ... ok
+test_search_cinema (test_datasets_compatibility.DatasetCompatibilityTests.test_search_cinema) ... ok
+test_search_movie (test_datasets_compatibility.DatasetCompatibilityTests.test_search_movie) ... ok
+test_single_day (test_datasets_compatibility.DatasetCompatibilityTests.test_single_day) ... ok
+test_year (test_datasets_compatibility.DatasetCompatibilityTests.test_year) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 0.618s
+
+OK

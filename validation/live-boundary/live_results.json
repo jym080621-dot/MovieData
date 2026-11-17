@@ -1,0 +1,47 @@
+{
+  "dns": {
+    "ok": true,
+    "addresses": [
+      "36.158.231.177",
+      "36.158.231.241"
+    ]
+  },
+  "max_requests": 2,
+  "interval_seconds": 5,
+  "retries": 0,
+  "redirects_followed": false,
+  "requests": 2,
+  "stopped": null,
+  "entries": [
+    {
+      "index": 1,
+      "url": "https://zgdypf.zgdypw.cn/getCinemaBoxData?cinemaCode=31081501&date=2017-01-01",
+      "started_at": "2026-11-17T03:13:27.379520+00:00",
+      "status": 204,
+      "headers": {
+        "Date": "Tue, 17 Nov 2026 03:13:30 GMT"
+      },
+      "tls_verified": true,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "body_file": "01_response.bin",
+      "elapsed_ms": 3086
+    },
+    {
+      "index": 2,
+      "url": "https://zgdypf.zgdypw.cn/getCinemaSumData?cinemaCode=31081501&date=2017-01-01",
+      "started_at": "2026-11-17T03:13:32.379591+00:00",
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Length": "48",
+        "Date": "Tue, 17 Nov 2026 03:13:34 GMT"
+      },
+      "tls_verified": true,
+      "bytes": 48,
+      "sha256": "ecd4637c6dd16f9ae90bc5eb69de330b1b461831dfd2c1559e20aaed599cd803",
+      "body_file": "02_response.bin",
+      "elapsed_ms": 1753
+    }
+  ]
+}

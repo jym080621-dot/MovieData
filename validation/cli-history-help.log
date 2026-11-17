@@ -1,0 +1,11 @@
+usage: pipeline.py movie-history [-h]
+                                 {roster-import,roster-refresh,export,audit,repair}
+                                 ...
+
+positional arguments:
+  {roster-import,roster-refresh,export,audit,repair}
+    roster-import       合并每日影院名单 CSV
+    roster-refresh      联网更新每日影院名单
+
+options:
+  -h, --help            show this help message and exit

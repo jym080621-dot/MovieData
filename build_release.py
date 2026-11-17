@@ -8,7 +8,7 @@
   2. MovieData_v<ver>_source.zip       源码备份（无数据库、无 raw、无 output）
 
 用法：
-  python build_release.py            # 只打包（exe 已存在则复用）
+  python build_release.py --source-only  # 源码包，支持 Linux
   python build_release.py --build    # 先调 PyInstaller 重新构建 exe
 """
 from __future__ import annotations
@@ -38,17 +38,19 @@ SRC_FILES = [
     "gui.py", "national_history_gui.py", "pipeline.py", "contract_test.py", "make_tables.py", "build_release.py",
     "启动采集器.bat", "launch_source.bat", "启动说明.txt",
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
-    "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py",
+    "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py", "tests/test_v151_quality.py",
+    "tests/test_v151_integration.py", "tests/test_datasets_compatibility.py", "tests/test_release.py",
+    "VALIDATION_v1.5.1.md",
     "启动全国全影院历史.bat", "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md",
     "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "MovieData_v1.4.2_使用说明.md",
-    "MovieData_v1.5.0_使用说明.md",
+    "MovieData_v1.5.0_使用说明.md", "MovieData_v1.5.1_使用说明.md",
     "sample.csv", "LICENSE",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png", "ui_national_v1.4.1.png"]
 PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png",
              "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png",
              "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "ui_national_v1.4.1.png",
-             "MovieData_v1.4.2_使用说明.md", "MovieData_v1.5.0_使用说明.md"]
+             "MovieData_v1.4.2_使用说明.md", "MovieData_v1.5.0_使用说明.md", "MovieData_v1.5.1_使用说明.md"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================
@@ -147,6 +149,13 @@ def zip_sources() -> str:
         for f in sorted(os.listdir(pkg)):
             if f.endswith(".py"):
                 z.write(os.path.join(pkg, f), f"{top}/zgdypf/{f}")
+        for folder in ("tests/fixtures", "tools", "validation"):
+            for p in sorted((Path(ROOT) / folder).rglob("*")):
+                if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc":
+                    z.write(p, f"{top}/{p.relative_to(ROOT).as_posix()}")
+    with zipfile.ZipFile(zip_path) as z:
+        if z.testzip() is not None:
+            raise RuntimeError("源码 ZIP CRC 校验失败")
     log(f"  ✓ {os.path.basename(zip_path)}  {os.path.getsize(zip_path)/1e6:.1f} MB")
     return zip_path
 
@@ -169,14 +178,17 @@ def zip_data() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--build", action="store_true", help="先重新构建 exe")
+    ap.add_argument("--source-only", action="store_true", help="只生成源码 ZIP，不构建或复用 EXE")
     ap.add_argument("--data", action="store_true", help="额外打一个数据库备份包")
     a = ap.parse_args()
 
     os.makedirs(DIST, exist_ok=True)
-    if a.build or not os.path.exists(EXE):
-        build_exe()
-    else:
-        log(f"▶ 复用已有 exe：{os.path.basename(EXE)}  {os.path.getsize(EXE)/1e6:.1f} MB")
+    if a.source_only:
+        zip_sources()
+        return 0
+    if sys.platform != "win32":
+        raise SystemExit("Windows EXE 必须在 Windows 上全新构建；当前环境请使用 --source-only")
+    build_exe()
 
     log("▶ 组装程序目录 …")
     pkg = make_program_dir()

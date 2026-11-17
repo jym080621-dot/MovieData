@@ -1,0 +1,65 @@
+test_204_ledger_and_rotation_rollback_together (test_v151_integration.IntegrationTests.test_204_ledger_and_rotation_rollback_together) ... FAIL
+test_changed_rotation_invalidates_reviewed_plan (test_v151_integration.IntegrationTests.test_changed_rotation_invalidates_reviewed_plan) ... ERROR
+test_failed_first_cinema_does_not_starve_remaining_204s (test_v151_integration.IntegrationTests.test_failed_first_cinema_does_not_starve_remaining_204s) ... FAIL
+test_light_audit_preserves_existing_matrix_and_exact_money (test_v151_integration.IntegrationTests.test_light_audit_preserves_existing_matrix_and_exact_money) ... ok
+test_mixed_success_day_yields_next_batch_to_other_date (test_v151_integration.IntegrationTests.test_mixed_success_day_yields_next_batch_to_other_date) ... FAIL
+
+======================================================================
+ERROR: test_changed_rotation_invalidates_reviewed_plan (test_v151_integration.IntegrationTests.test_changed_rotation_invalidates_reviewed_plan)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData-v1.5.1/tests/test_v151_integration.py", line 52, in test_changed_rotation_invalidates_reviewed_plan
+    n.run_plan(old, self.root/'raw', self.root/'out', client_factory=self.client)
+  File "/workspace/MovieData-v1.5.1/zgdypf/national_history.py", line 292, in run_plan
+    detail = history._repair(db_path, plan["movie"], plan["start"], plan["end"], "national", (),
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/MovieData-v1.5.1/zgdypf/movie_history.py", line 450, in _repair
+    result, count = collect(conn, client, code, day)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/MovieData-v1.5.1/zgdypf/cinema_detail.py", line 40, in collect
+    response = api.cinema_box_response(client, code, day)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/MovieData-v1.5.1/zgdypf/api.py", line 92, in cinema_box_response
+    return c.fetch("/getCinemaBoxData", {"cinemaCode": code, "date": date},
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/MovieData-v1.5.1/zgdypf/client.py", line 209, in fetch
+    with self._open(req, timeout=self.timeout) as resp:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/MovieData-v1.5.1/tests/test_movie_history.py", line 51, in fake_open
+    status, data = self.routes.pop(0)
+                   ^^^^^^^^^^^^^^^^^^
+IndexError: pop from empty list
+
+======================================================================
+FAIL: test_204_ledger_and_rotation_rollback_together (test_v151_integration.IntegrationTests.test_204_ledger_and_rotation_rollback_together)
+----------------------------------------------------------------------
+TypeError: collect() got an unexpected keyword argument 'record_attempt'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/MovieData-v1.5.1/tests/test_v151_integration.py", line 59, in test_204_ledger_and_rotation_rollback_together
+    with self.assertRaisesRegex(Exception, 'rotation failure'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "rotation failure" does not match "collect() got an unexpected keyword argument 'record_attempt'"
+
+======================================================================
+FAIL: test_failed_first_cinema_does_not_starve_remaining_204s (test_v151_integration.IntegrationTests.test_failed_first_cinema_does_not_starve_remaining_204s)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData-v1.5.1/tests/test_v151_integration.py", line 35, in test_failed_first_cinema_does_not_starve_remaining_204s
+    self.assertEqual(len(set(codes)), 3, codes)
+AssertionError: 1 != 3 : ['00112233', '00112233', '00112233']
+
+======================================================================
+FAIL: test_mixed_success_day_yields_next_batch_to_other_date (test_v151_integration.IntegrationTests.test_mixed_success_day_yields_next_batch_to_other_date)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/MovieData-v1.5.1/tests/test_v151_integration.py", line 42, in test_mixed_success_day_yields_next_batch_to_other_date
+    self.assertIn('2026-05-01', self.calls[1])
+AssertionError: '2026-05-01' not found in 'https://zgdypf.zgdypw.cn/getCinemaBoxData?cinemaCode=10112233&date=2026-04-30'
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.175s
+
+FAILED (failures=3, errors=1)
