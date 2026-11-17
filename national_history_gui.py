@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import csv
 import queue
 import sqlite3
 import threading
@@ -9,7 +10,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 
-from zgdypf import __version__, db, history_roster, movie_history
+from zgdypf import __version__, db, history_roster, movie_history, cinema_registry
 from zgdypf import national_history as national
 
 
@@ -342,9 +343,14 @@ class NationalHistoryPage(tk.Toplevel):
         path = filedialog.askopenfilename(parent=self, filetypes=[("CSV 名单", "*.csv")])
         if path:
             def work():
-                conn = db.connect(str(self.db_path))
-                conn.close()
-                return history_roster.import_csv(self.db_path, path)
+                with open(path, encoding="utf-8-sig", newline="") as fh:
+                    fields = csv.DictReader(fh).fieldnames or []
+                if "date" in fields:
+                    conn = db.connect(str(self.db_path))
+                    conn.close()
+                    return history_roster.import_csv(self.db_path, path)
+                manifest = Path(path).with_suffix(".manifest.json")
+                return cinema_registry.import_directory(self.db_path, path, manifest)
             self.begin("import", work)
 
     def export(self):
@@ -435,6 +441,8 @@ class NationalHistoryPage(tk.Toplevel):
         elif mode == "export":
             self.show_coverage(national.coverage_from_summary(result["summary"]))
             self.status.set("已导出影院日明细、逐日审计和完整性说明。全国完整性仍未证实。")
+        elif result.get("source_id"):
+            self.status.set(f"导入独立名录 {result['records']:,} 家，新增 {len(result['new_codes']):,} 个编码；全国完整性尚未证实，请重新生成计划。")
         else:
             self.status.set(f"导入 {result['records']:,} 条名单记录，覆盖 {result['days']} 天；请重新生成计划。")
 

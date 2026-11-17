@@ -40,17 +40,18 @@ SRC_FILES = [
     "README.md", "CONTRACT.md", "使用教程.md", "QA_REPORT.md", "TABLES.md", "单片历史影院使用说明.md",
     "tests/test_movie_history.py", "tests/test_national_history.py", "tests/test_national_gui.py", "tests/test_v151_quality.py",
     "tests/test_v151_integration.py", "tests/test_datasets_compatibility.py", "tests/test_release.py",
-    "VALIDATION_v1.5.1.md",
+    "VALIDATION_v1.5.1.md", "VALIDATION_v1.5.2.md", "NATIONAL_ROSTER_REPORT.md", "全国影院名录导入说明.md",
+    "tests/test_cinema_registry.py",
     "启动全国全影院历史.bat", "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md",
     "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "MovieData_v1.4.2_使用说明.md",
-    "MovieData_v1.5.0_使用说明.md", "MovieData_v1.5.1_使用说明.md",
+    "MovieData_v1.5.0_使用说明.md", "MovieData_v1.5.1_使用说明.md", "MovieData_v1.5.2_使用说明.md",
     "sample.csv", "LICENSE",
 ]
 DOC_IMAGES = ["ui_all.png", "ui_running.png", "ui_national_v1.4.0.png", "ui_national_v1.4.1.png"]
 PKG_FILES = ["使用教程.md", "README.md", "单片历史影院使用说明.md", "启动说明.txt", "ui_all.png",
              "MovieData_v1.4.0_使用说明.md", "TEST_REPORT_v1.4.0.md", "CHANGELOG.md", "LICENSE", "ui_national_v1.4.0.png",
              "MovieData_v1.4.1_使用说明.md", "TEST_REPORT_v1.4.1.md", "ui_national_v1.4.1.png",
-             "MovieData_v1.4.2_使用说明.md", "MovieData_v1.5.0_使用说明.md", "MovieData_v1.5.1_使用说明.md"]
+             "MovieData_v1.4.2_使用说明.md", "MovieData_v1.5.0_使用说明.md", "MovieData_v1.5.1_使用说明.md", "MovieData_v1.5.2_使用说明.md"]
 
 START_TXT = """电影票房采集器 v{ver}
 ============================================================
@@ -149,7 +150,7 @@ def zip_sources() -> str:
         for f in sorted(os.listdir(pkg)):
             if f.endswith(".py"):
                 z.write(os.path.join(pkg, f), f"{top}/zgdypf/{f}")
-        for folder in ("tests/fixtures", "tools", "validation"):
+        for folder in ("tests/fixtures", "tools", "validation", "examples"):
             for p in sorted((Path(ROOT) / folder).rglob("*")):
                 if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc":
                     z.write(p, f"{top}/{p.relative_to(ROOT).as_posix()}")

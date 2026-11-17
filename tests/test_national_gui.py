@@ -277,6 +277,36 @@ class NationalGuiTests(unittest.TestCase):
         self.assertLessEqual(button.winfo_rootx()+button.winfo_width(),
                              self.page.winfo_rootx()+self.page.winfo_width())
 
+    def test_independent_registry_import_through_existing_button(self):
+        import test_cinema_registry as registry_fixtures
+        helper = registry_fixtures.RegistryTests()
+        helper.root = self.root
+        csv_path, manifest = helper.files()
+        # Companion manifest is adjacent; this flow does not request the network.
+        with patch('national_history_gui.filedialog.askopenfilename', return_value=str(csv_path)), \
+             patch('urllib.request.OpenerDirector.open', side_effect=AssertionError('network')):
+            self.page.import_button.invoke()
+            self.wait()
+            self.assertIn('独立名录', self.page.status.get())
+            self.page.preview_button.invoke()
+            self.wait()
+        self.assertEqual(self.page.plan['totals']['targets'], 2)
+        self.assertEqual(self.page.plan['days'][0]['registry']['reference_count'], 2)
+        self.assertFalse(self.page.plan['national_complete'])
+        self.page.export_button.invoke()
+        self.wait()
+        self.assertTrue(list((self.root/'out').rglob('registry_gaps.csv')))
+
+    def test_registry_manifest_missing_recovers_controls_without_creating_database(self):
+        path = self.root/'without-manifest.csv'
+        path.write_text('cinema_code\n31081501\n')
+        with patch('national_history_gui.filedialog.askopenfilename', return_value=str(path)):
+            self.page.import_button.invoke()
+            self.wait()
+        self.assertIn('处理未完成', self.page.status.get())
+        self.assertFalse(self.page.db_path.exists())
+        self.assertEqual(str(self.page.import_button['state']), 'normal')
+
 
 if __name__ == "__main__":
     unittest.main()

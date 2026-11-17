@@ -1,0 +1,19 @@
+test_atomic_rollback_if_registry_entry_write_fails (test_cinema_registry.RegistryTests.test_atomic_rollback_if_registry_entry_write_fails) ... ok
+test_changes_in_source_provenance_invalidate_plan (test_cinema_registry.RegistryTests.test_changes_in_source_provenance_invalidate_plan) ... ok
+test_cli_preview_and_import (test_cinema_registry.RegistryTests.test_cli_preview_and_import) ... ok
+test_duplicate_or_invalid_code_rejected (test_cinema_registry.RegistryTests.test_duplicate_or_invalid_code_rejected) ... ok
+test_existing_facts_and_old_codes_preserved_idempotent_import (test_cinema_registry.RegistryTests.test_existing_facts_and_old_codes_preserved_idempotent_import) ... ok
+test_fake_national_manifest_cannot_certify_completeness (test_cinema_registry.RegistryTests.test_fake_national_manifest_cannot_certify_completeness) ... ok
+test_import_all_statuses_and_leading_zero_ids_into_every_day (test_cinema_registry.RegistryTests.test_import_all_statuses_and_leading_zero_ids_into_every_day) ... ok
+test_invalid_count_or_hash_never_partially_imports (test_cinema_registry.RegistryTests.test_invalid_count_or_hash_never_partially_imports) ... ok
+test_no_geographic_or_type_filter_can_certify_national_roster (test_cinema_registry.RegistryTests.test_no_geographic_or_type_filter_can_certify_national_roster) ... ok
+test_preview_offline_does_not_create_database (test_cinema_registry.RegistryTests.test_preview_offline_does_not_create_database) ... ok
+test_province_or_operating_only_or_wrong_period_is_insufficient (test_cinema_registry.RegistryTests.test_province_or_operating_only_or_wrong_period_is_insufficient) ... ok
+test_reference_difference_audits_both_directions (test_cinema_registry.RegistryTests.test_reference_difference_audits_both_directions) ... ok
+test_registry_codes_survive_loss_of_dim_cache (test_cinema_registry.RegistryTests.test_registry_codes_survive_loss_of_dim_cache) ... ok
+test_registry_export_retains_unknowns_and_does_not_modify_database (test_cinema_registry.RegistryTests.test_registry_export_retains_unknowns_and_does_not_modify_database) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.341s
+
+OK

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import datetime as dt
 import os
 import sqlite3
@@ -26,7 +27,7 @@ from typing import List, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import api, db, history_roster, movie_history
+from zgdypf import api, db, history_roster, movie_history, cinema_registry
 from zgdypf import app_root as _app_root
 from zgdypf import sample as samp
 from zgdypf.cinema_detail import collect, defer_empty, reusable_slices
@@ -504,6 +505,16 @@ def cmd_export(args) -> int:
 
 def cmd_movie_history(args) -> int:
     try:
+        if args.mode in ("registry-preview", "registry-import"):
+            result = (cinema_registry.preview_import(args.db, args.csv, args.manifest)
+                      if args.mode == "registry-preview" else
+                      cinema_registry.import_directory(args.db, args.csv, args.manifest))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.mode == "registry-audit":
+            result = cinema_registry.export_audit(args.db,args.out,args.code,args.start,args.end)
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+            return 0
         if args.mode == "roster-import":
             result = history_roster.import_csv(args.db, args.csv)
             print(f"名单已合并 · {result['days']:,} 天 · 输入 {result['records']:,} 个不重复影院日")
@@ -600,6 +611,19 @@ def main() -> int:
 
     history = sub.add_parser("movie-history", help="单片影院明细导出、审计与补采")
     actions = history.add_subparsers(dest="mode", required=True)
+    for mode in ("registry-preview", "registry-import"):
+        p = actions.add_parser(mode, help="离线名录预览/导入；不证明全国完整")
+        p.add_argument("--db", default=DB_PATH)
+        p.add_argument("--csv", required=True)
+        p.add_argument("--manifest", required=True)
+        p.set_defaults(func=cmd_movie_history)
+    p = actions.add_parser("registry-audit", help="逐家核对独立名录、已知候选和影院日缺口")
+    p.add_argument("--db", default=DB_PATH)
+    p.add_argument("--code", required=True)
+    p.add_argument("--start", required=True)
+    p.add_argument("--end", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_movie_history)
     p = actions.add_parser("roster-import", help="合并每日影院名单 CSV")
     p.add_argument("--db", default=DB_PATH)
     p.add_argument("--csv", required=True)

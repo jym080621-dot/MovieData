@@ -1,6 +1,6 @@
 # MovieData
 
-MovieData 是一个桌面电影票房采集工具。它从中国电影票房网站 `zgdypf.zgdypw.cn` 读取大盘、榜单、影片、影院和院线数据，保存到本地 SQLite，并导出 CSV 和 JSON。本说明适用于 **v1.5.1**。
+MovieData 是一个桌面电影票房采集工具。它从中国电影票房网站 `zgdypf.zgdypw.cn` 读取大盘、榜单、影片、影院和院线数据，保存到本地 SQLite，并导出 CSV 和 JSON。本说明适用于 **v1.5.2**。
 
 ## 选择采集方式
 
@@ -61,3 +61,7 @@ v1.5.1 集成验收结果见 [VALIDATION_v1.5.1.md](VALIDATION_v1.5.1.md)。源�
 
 本次集成验收与限制见 [VALIDATION_v1.5.1.md](VALIDATION_v1.5.1.md)。源码包保留 8 次受控请求的轻量验证证据，不包含采集数据库或全国采集结果。
 仅打包源码（Linux / Windows）：`python build_release.py --source-only`；Windows 新 EXE 仍须在 Windows 运行 `python build_release.py --build`。
+
+全国影院名录增强：支持独立名录的来源/哈希校验、全部编码入队和逐影院差集审计。见 [全国影院名录导入说明](全国影院名录导入说明.md) 和 [本轮报告](NATIONAL_ROSTER_REPORT.md)。本轮尚未取得经核实的全国完整名录，不能视为全国完整性验收已通过。
+
+v1.5.2 将此前的全国影院名录增强功能独立编号；保留 v1.5.1 的 HTTP 204、轮转、断点与缓存修复。当前源码包说明见 [MovieData_v1.5.2_使用说明.md](MovieData_v1.5.2_使用说明.md)，本版本验证记录见 [VALIDATION_v1.5.2.md](VALIDATION_v1.5.2.md)。全国完整名录尚未取得，完整性仍未证实；尚未发布到 GitHub。

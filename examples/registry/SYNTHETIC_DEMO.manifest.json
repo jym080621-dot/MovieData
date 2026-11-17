@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "source_name": "合成演示，不是真实全国名录",
+  "source_url": "https://example.invalid/synthetic-demo",
+  "as_of": "2026-11-17",
+  "coverage_start": "2026-01-01",
+  "coverage_end": "2026-11-17",
+  "region_scope": "CN",
+  "status_scope": "all",
+  "cinema_type_scope": "all",
+  "expected_count": 2,
+  "csv_sha256": "df8d8f45080de6d9f0f6506d71a7e09da281844cd5bb2c4433325355dc0eba78"
+}

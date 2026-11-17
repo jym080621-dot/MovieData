@@ -11,7 +11,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from . import __version__, db, history_roster, movie_history as history, national_quality as quality
+from . import __version__, db, history_roster, movie_history as history, national_quality as quality, cinema_registry
 from .client import Client, DEFAULT_JITTER
 from .common import daterange
 
@@ -73,14 +73,15 @@ def make_plan(db_path, movie, start, end, *, max_requests=3000, minutes=60,
             pending = len(history._pending(states, retry_empty))
             rotation = list(conn.execute(
                 "SELECT cinema_code,id FROM history_204_review_queue WHERE date=? ORDER BY id", (day,))) if history_roster._exists(conn, "history_204_review_queue") else []
-            row = dict(date=day, targets=len(states), cached=counts["with_movie"] + counts["without_movie"],
+            registry = cinema_registry.assess(conn, day, states)
+            row = dict(date=day, registry=registry, targets=len(states), cached=counts["with_movie"] + counts["without_movie"],
                        pending=pending, states=dict(counts), roster_request_needed=refresh,
                        roster_status=record["status"] if record else "not_collected",
                        roster_rows=record["row_count"] if record else 0,
                        roster_offset=record["next_offset"] if record else 0,
                        roster_pages=record["pages"] if record else 0,
                        evidence_hash=_hash([states, sources, dict(record) if record else None,
-                                           [tuple(r) for r in rotation]]),
+                                           [tuple(r) for r in rotation], registry]),
                        national_complete=False)
             days.append(row)
             totals.update(targets=len(states), cached=row["cached"], pending=pending,
@@ -178,6 +179,9 @@ def format_plan(plan):
     empty_note = (f"本次续跑估算排除了 {t['deferred_204']:,} 个暂缓的 204。\n"
                   if t["deferred_204"] and not o["retry_empty"] else "")
     timing_basis = "预计耗时按串行请求、0.15–0.50 秒响应及处理时间和限速间隔估算，另计重试、导出及批次间等待。"
+    reference = plan["days"][0]["registry"]
+    reference_note = (f"独立名录来源 {len(reference['reference_sources'])} 个；名录并集 {reference['reference_count']:,} 家。"
+                      "来源声明尚未独立验证，不能据此认定全国完整。\n")
     return (f"影片编码 {plan['movie']}　|　{plan['start']} 至 {plan['end']}（含首尾）\n"
             f"全程估算（从零开始，{o['rate']:g} 次/秒上限）：约 {estimate['full_requests']:,} 次请求"
             f" · {_duration_range(estimate['full_seconds'])}。\n"
@@ -190,7 +194,7 @@ def format_plan(plan):
             f"需获取或续取名单 {t.get('roster_days', 0)} 天；仅本地已知的首轮必要请求 {known}。\n"
             f"{format_budget(o['max_requests'], o['minutes'])}，每秒最多 {o['rate']:g} 次。\n"
             f"204 重试：{'是' if o['retry_empty'] else '否'}；重新核实名单：{'是' if o['refresh_roster'] else '否'}。\n"
-            f"{plan['execution']}\n当前队列完成后如仍有 HTTP 204 / 异常名单，请用③复核缺口生成新计划。\n{NOTICE}")
+            f"{reference_note}{plan['execution']}\n当前队列完成后如仍有 HTTP 204 / 异常名单，请用③复核缺口生成新计划。\n{NOTICE}")
 
 
 def export_audit(db_path, out_dir, movie, start, end, *, write_matrix=True):
@@ -225,12 +229,19 @@ def export_audit(db_path, out_dir, movie, start, end, *, write_matrix=True):
             refresh = refreshes.get(day)
             roster_status = refresh["status"] if refresh else "not_collected"
             assessment = quality.assess_day(counts, roster_status, len(states))
+            registry = cinema_registry.assess(conn, day, states)
             daily.append(dict(date=day, target_count=len(states),
                               observed=assessment["known_verified"],
                               **{s: counts[s] for s in history.DAY_STATES},
                               known_roster_observed=assessment["known_scope_complete"],
                               roster_status=roster_status,
                               roster_rows=refresh["row_count"] if refresh else 0,
+                              registry_source_count=len(registry["reference_sources"]),
+                              registry_count=registry["reference_count"],
+                              registry_unresolved=registry["reference_unresolved"],
+                              registry_missing_from_queue=registry["reference_missing_from_queue"],
+                              registry_known_outside_reference=registry["known_outside_reference"],
+                              registry_blockers="|".join(registry["blockers"]),
                               national_roster_coverage="unverified",
                               **assessment))
             totals.update(counts)
@@ -258,6 +269,13 @@ def export_audit(db_path, out_dir, movie, start, end, *, write_matrix=True):
                    matrix_rebuilt=bool(write_matrix), national_complete=False, notice=NOTICE)
     with history._report_file(paths["summary"]) as temp:
         temp.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    if write_matrix:
+        with snapshot(db_path) as conn:
+            has_reference = bool(cinema_registry.sources(conn))
+        if has_reference:
+            registry = cinema_registry.export_audit(db_path, root.parent / (root.name + "_registry"), movie, start, end)
+            paths["registry_gaps"] = Path(registry["gaps"])
+            paths["registry_audit"] = Path(registry["summary"])
     return dict(paths=paths, summary=summary)
 
 

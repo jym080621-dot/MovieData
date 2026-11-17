@@ -119,6 +119,10 @@ def candidates(conn, day, rank_codes, detail_codes, *, include_registry=False):
         for (code,) in conn.execute(registry_sql):
             if valid_code(code):
                 sources[code].add("known_registry_unverified_activity")
+    if include_registry and _exists(conn, "cinema_registry_entry"):
+        for code, source in conn.execute("SELECT cinema_code,source_id FROM cinema_registry_entry"):
+            if valid_code(code):
+                sources[code].add("registry:" + source)
     return {code: sorted(sources[code]) for code in sorted(sources)}
 
 

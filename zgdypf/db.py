@@ -185,6 +185,21 @@ CREATE TABLE IF NOT EXISTS history_roster_refresh (
     checked_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cinema_registry_source (
+    source_id TEXT PRIMARY KEY,
+    metadata TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cinema_registry_entry (
+    source_id TEXT NOT NULL REFERENCES cinema_registry_source(source_id),
+    cinema_code TEXT NOT NULL,
+    cinema_name TEXT,
+    province_code TEXT,
+    business_status TEXT,
+    PRIMARY KEY(source_id,cinema_code)
+);
+CREATE INDEX IF NOT EXISTS idx_registry_code ON cinema_registry_entry(cinema_code);
+
 CREATE TABLE IF NOT EXISTS date_status (
     date         TEXT PRIMARY KEY,
     n_cinemas    INTEGER,
