@@ -7,3 +7,7 @@
 全国完整名录尚未取得；全国完整性仍为false/unverified。Windows EXE与实机验收未完成，GitHub发布未完成。
 
 本次完整回归119项全部通过；源码包全新解压后119项复验全部通过。日志在 `validation/v1.5.2/full-tests.log` 和 `validation/v1.5.2/package-tests.log`。ZIP CRC、内部版本号、包内顶层目录及新版本说明文件均通过核对。
+
+## Windows 本地跟进
+
+2026-11-17 从原始 v1.5.2 源码包解压，在 Windows 上复跑 119 项测试，全部通过。用原包业务代码构建 64 位免安装版，验证 `MovieData.exe` 能打开主界面和全国历史页面并正常关闭。此轮以离线测试复验既有行为，全国历史名录的完整性结论仍待来源核实。

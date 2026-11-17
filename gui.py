@@ -24,7 +24,7 @@ from tkinter import messagebox, ttk
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from zgdypf import __version__, app_root, datasets, db, movie_history
+from zgdypf import __version__, app_root, datasets, db, latest_roster, movie_history
 from zgdypf.client import Client
 from national_history_gui import NationalHistoryPage
 
@@ -58,6 +58,8 @@ class App(tk.Tk):
         self._engine = None
         self._stop = threading.Event()
         self._running = False
+        self._roster_active = False
+        self._close_after_roster = False
         self._t0 = 0.0
         self._total = 0
 
@@ -109,6 +111,8 @@ class App(tk.Tk):
         national_bar.pack(fill="x")
         self.btn_national = ttk.Button(national_bar, text="全国全影院历史票房采集 →", command=self._national_history_page)
         self.btn_national.pack(side="left")
+        self.btn_roster = ttk.Button(national_bar, text="获取最新影院名录", command=self._download_roster)
+        self.btn_roster.pack(side="left", padx=(8, 0))
         ttk.Label(national_bar, text=f"  v{__version__} · 离线计划 / 分批续跑 / 逐日审计", style="Sub.TLabel").pack(side="left")
 
         body = ttk.Frame(self, padding=(18, 4, 18, 6))
@@ -510,6 +514,42 @@ class App(tk.Tk):
         self.national_page = NationalHistoryPage(self, DB_PATH, RAW_DIR,
             os.path.join(ROOT, "output", "national_history"), self.v_start.get(), self.v_end.get())
 
+    def _download_roster(self):
+        if self._running:
+            self.lbl_status.configure(text="请等待当前任务结束后再获取影院名录。")
+            return
+        self._running = self._roster_active = True
+        self._stop = threading.Event()
+        for button in (self.btn_roster, self.btn_start, self.btn_est):
+            button.configure(state="disabled")
+        self.btn_stop.configure(state="normal")
+        self.pb.configure(value=0)
+        self.lbl_prog.configure(text="下载影院名单…")
+        self.lbl_status.configure(text="正在查询最新公开影院票房榜…")
+        self._log("下载公开影院票房榜候选名单 · 全国名录完整性未核实", "head")
+        folder = os.path.join(ROOT, "output", "cinema_roster")
+        threading.Thread(target=self._roster_worker, args=(folder, self._stop), daemon=True).start()
+
+    def _roster_worker(self, folder, stop):
+        try:
+            result = latest_roster.download(folder, stopped=stop.is_set, emit=self._emit)
+            self.q.put(("roster_done", result, None))
+        except Exception as exc:
+            self.q.put(("roster_done", None, str(exc)))
+
+    def _finish_roster(self, result, error):
+        self._roster_active = False
+        self._reset()
+        if error:
+            self._log(f"获取影院名录未完成 · {error}", "warn")
+            self.lbl_prog.configure(text="名单下载未完成")
+            self.lbl_status.configure(text="名单下载未完成，已有 CSV 已保留。")
+            return
+        date = result["date"]
+        self._log(f"已保存 {date} 影院榜的 {result['count']:,} 家候选影院 · {result['path']}", "ok")
+        self.lbl_prog.configure(text=f"已导出 {result['count']:,} 家")
+        self.lbl_status.configure(text=f"榜单日期 {date} · CSV 已保存 · 全国完整性未核实")
+
     def _check_data_folder(self):
         """将移动后无法打开数据库的错误显示在窗口中。"""
         if not os.path.isfile(DB_PATH):
@@ -575,6 +615,11 @@ class App(tk.Tk):
                     self.lbl_prog.configure(text=f"{done:,} / {total:,}  {pct:.0f}%")
                 elif k == "done":
                     self._finish(m[1], m[2], m[3])
+                elif k == "roster_done":
+                    self._finish_roster(m[1], m[2])
+                    if self._close_after_roster:
+                        self.destroy()
+                        return
                 elif k == "exported":
                     self.btn_export.configure(state="normal")
                     self._log(f"导出完成：{m[1]['movies']} 部影片 · {m[1].get('cinemas', 0)} 家影院 · "
@@ -596,6 +641,10 @@ class App(tk.Tk):
         self.poll_id = self.after(120, self._poll)
 
     def close(self):
+        if self._roster_active:
+            self._close_after_roster = True
+            self._stop_click()
+            return
         page = getattr(self, "national_page", None)
         if page is not None and page.winfo_exists() and page.busy:
             page.close(after=self.destroy)
@@ -627,6 +676,7 @@ class App(tk.Tk):
     def _reset(self):
         self._running = False
         self.btn_start.configure(state="normal")
+        self.btn_roster.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.btn_est.configure(state="normal")
 

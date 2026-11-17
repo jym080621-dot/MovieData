@@ -156,6 +156,21 @@ def _save_refresh(conn, day, run_id, status, offset, pages, count):
     )
 
 
+def fetch_site_page(client, day, offset, *, raw_rel=None, allow_initial_204=False):
+    """Read one validated page of the public cinema ranking."""
+    response = client.fetch("/getCinemaList", {
+        "date": day, "withSvcFee": "true", "limit": PAGE_SIZE, "offset": offset,
+    }, raw_rel=raw_rel)
+    if allow_initial_204 and offset == 0 and response.status == 204:
+        return [], False
+    body = response.data
+    rows = body.get("salesRankList") if isinstance(body, dict) else None
+    if (response.status != 200 or not isinstance(rows, list) or len(rows) > PAGE_SIZE
+            or type(body.get("hasMore")) is not bool):
+        raise BadPayload(f"{day} 影院榜响应格式异常（偏移量 {offset}）")
+    return rows, body["hasMore"]
+
+
 def refresh_day(conn, client, day, previous, emit):
     """从已提交的页接着翻。一次成功响应和进度在同一事务提交。"""
     if previous and previous["status"] == "fetching":
@@ -165,14 +180,7 @@ def refresh_day(conn, client, day, previous, emit):
     known = _known_codes(conn, day)
     new_total = 0
     while pages < MAX_PAGES:
-        response = client.fetch("/getCinemaList", {
-            "date": day, "withSvcFee": "true", "limit": PAGE_SIZE, "offset": offset,
-        }, raw_rel=f"history_roster/{day}/{run_id}/{offset}")
-        body = response.data
-        rows = body.get("salesRankList") if isinstance(body, dict) else None
-        if (response.status != 200 or not isinstance(rows, list) or len(rows) > PAGE_SIZE
-                or type(body.get("hasMore")) is not bool):
-            raise BadPayload("每日影院榜响应格式异常")
+        rows, has_more = fetch_site_page(client, day, offset, raw_rel=f"history_roster/{day}/{run_id}/{offset}")
         page = {}
         invalid = False
         for row in rows:
@@ -193,9 +201,9 @@ def refresh_day(conn, client, day, previous, emit):
                    WHERE date=? AND source=? AND run_id=?""",
                 (day, SITE, run_id),
             ).fetchone()[0]
-            if invalid or found - count != len(page) or body["hasMore"] and not rows:
+            if invalid or found - count != len(page) or has_more and not rows:
                 status = "partial"
-            elif not body["hasMore"]:
+            elif not has_more:
                 status = "listed" if found >= MIN_CINEMAS else "thin"
             else:
                 status = "fetching" if pages < MAX_PAGES else "partial"

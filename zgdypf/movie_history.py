@@ -321,7 +321,8 @@ def _batch_client(raw_dir, rate, max_requests, minutes, stopped, client_factory,
         if max_requests and client.stats.requests >= max_requests:
             raise BatchEnded("到达请求上限")
 
-    client = client_factory(rate=rate, retries=2, timeout=15, raw_dir=str(raw_dir), request_guard=guard)
+    client = client_factory(rate=rate, retries=2, timeout=15,
+                            raw_dir=str(raw_dir) if raw_dir is not None else None, request_guard=guard)
     return client, guard
 
 
